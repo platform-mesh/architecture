@@ -1,11 +1,10 @@
 # RFC: API Provider Data and Provider UI Discovery in Platform Mesh
 
-| Status     | Proposed |
-|------------|----------|
-| Author     | [Author Name] |
-| Created    | YYYY-MM-DD |
-| RFC PR     | [Link to PR] |
-| Discussion | [Link to Discussion] |
+| Status  | Proposed                                                     |
+|---------|--------------------------------------------------------------|
+| Author  | @nexus49                                                     |
+| Created | 2025-07-01                                                   |
+| RFC PR  | [link](https://github.com/platform-mesh/architecture/pull/1) |
 
 ## Summary
 
