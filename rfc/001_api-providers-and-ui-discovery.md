@@ -1,28 +1,47 @@
-# API Provider data and Provider UI Discovery in Platform Mesh 
+# RFC: API Provider Data and Provider UI Discovery in Platform Mesh
+
+| Status     | Proposed |
+|------------|----------|
+| Author     | [Author Name] |
+| Created    | YYYY-MM-DD |
+| RFC PR     | [Link to PR] |
+| Discussion | [Link to Discussion] |
+
+## Summary
+
+This RFC proposes a mechanism for managing API provider metadata and UI discovery within Platform Mesh. It introduces new resources to address gaps in KCP's core resources, enabling richer provider metadata, controlled API binding, and dynamic UI integration for workspaces.
 
 ## Context and Problem Statement
 
-Platform Mesh adopts KCP to offer a central KRM based control plane for its users. KCP introduces a set of resources that allow service providers to register their API's and to bind such API's to a user workspace. Key resources here are `APIExport`, `APIBinding`, `APIResourceSchema`, and `Workspace`.
+Platform Mesh leverages KCP to provide a central KRM-based control plane. KCP introduces resources such as `APIExport`, `APIBinding`, `APIResourceSchema`, and `Workspace` for API registration and binding.
 
-With these preconditions in place there are certain concerns that are not possible / addressed by these core KCP resources:
+However, several concerns are not addressed by these core resources:
 
-- Where to provide additional metadata about the API Provider that could be used for discovery purposes. Examples of such metadata could be the Name, Description, Icon, Website, Support Channels, Documentation lings, etc.
-- In a platform-mesh installation it may not always be desirable that introduced API's can be bound by any workspace. For example adopters can create may `organizations` and there will be API's that are limited to a specific organization. It needs to be possible to constraint where a given APIExport can be bound to.
-- Next to the available API's it is also desirable that providers can register a UI to be integrated into the platform mesh portal. This UI should only be integrated when rendering the UI for a particular Workspace where the given UI is bound to. The portal application needs to be able to discover such registered UI's on the fly.
+- **Provider Metadata**: There is no standard way to attach metadata (name, description, icon, website, support, docs, etc.) to API providers for discovery purposes.
+- **Binding Constraints**: Not all APIs should be bindable by any workspace; some APIs may be organization-specific and require binding constraints.
+- **Provider UI Registration**: Providers may want to register UIs for integration into the Platform Mesh portal, visible only in relevant workspaces.
 
+This RFC proposes solutions to address these gaps, some of which may be candidates for KCP core, while others remain platform-mesh specific.
 
-This RFC will describe a proposal on how to close the above outlined gaps to seek feedback. Some aspects could be introduced as part of the KCP core, while others may remain platform-mesh specific.
+## Motivation
 
+- Enhance discoverability and management of API providers.
+- Enable fine-grained control over which workspaces can bind to specific APIs.
+- Support dynamic UI integration for providers within the portal.
 
-## API Provider Metadata
-- It is desirable to keep provider metadata co-located to the other resources that a provider would need to provide. Therefore, this information should be in the same workspace as the `APIExport`.
-- The Provider Metadata should be an optional aspect as internal API's may not have a provider and there can be installation scenarios where the provider metadata may not be relevant. 
-- A provider can be responsible for multiple APIExports, therefore the Provider Metadata should be a separate resource that can then be related to the APIExport.
+## Proposal
 
-### Proposal
-Introduce a new resource `APIProvider` that can be used to store the provider metadata. It should be possible to infer the `APIProvider` from a given APIExport. This could be done by using a optional field on the `APIExport` or by using a label/annotation on the `APIExport`.
+### API Provider Metadata
 
-A possible spec could look like this: 
+- Provider metadata should be co-located with other provider resources, ideally in the same workspace as the `APIExport`.
+- Metadata should be optional, as not all APIs require a provider or relevant metadata.
+- A provider may own multiple `APIExport` resources; thus, metadata should be a separate resource, referenced from `APIExport`.
+
+#### New Resource: `APIProvider`
+
+Introduce an `APIProvider` resource to store provider metadata. It should be possible to associate an `APIProvider` with an `APIExport` via an optional field, label, or annotation.
+
+**Example:**
 ```yaml
 apiVersion: api.platform-mesh.io/v1alpha1
 kind: APIProvider
@@ -66,16 +85,15 @@ spec:
     - name: Feedback Tracker
       url: "https://acme.corp/feedback"
 ```
-Above data is meant for demonstration purposes only and can be extended or changed as needed.
+*Note: The schema is illustrative and can be extended as needed.*
 
-## UI Discovery and Provider UI Binding
+### UI Discovery and Provider UI Binding
 
-- It is desirable to configure a provider's UI next to the other resources that a provider would need to provide.  Therefore this information should be in the same workspace as the `APIExport`.
-- OpenMFP makes use of a ContentConfiguration resources to configure a UI. As a consequence it would be good to have the content configration next to the other resources.
-- It should be avoided that the ContentConfiguration is copied to every workspace, therefore the proposal is to make use of a binding resource similar to the `APIBinding` resource.
-- This way only the `ContentConfiguration` resource will be validated and updated once and the UI's in all workspaces with a binding will update automatically.
+- Provider UI configuration should be co-located with other provider resources in the same workspace as the `APIExport`.
+- OpenMFP uses `ContentConfiguration` resources for UI configuration; these should not be duplicated across workspaces.
+- Introduce a binding resource, similar to `APIBinding`, to reference a shared `ContentConfiguration`.
 
-Example of a ContentConfiguration resource:
+**Example: ContentConfiguration**
 ```yaml
 apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfiguration
@@ -86,7 +104,7 @@ spec:
   inlineConfiguration:
     content: |-
       {
-        <!-- This is a JSON object that configure the to be integrated UI -->
+        <!-- This is a JSON object that configures the UI to be integrated -->
       }
     contentType: json
   remoteConfiguration:
@@ -94,7 +112,7 @@ spec:
     contentType: json
 ```
 
-The ContentConfigurationBinding resource would look like this:
+**Example: ContentConfigurationBinding**
 ```yaml
 apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfigurationBinding
@@ -107,5 +125,16 @@ spec:
       path: root:providers:acme-provider:acme.provider.io
 ```
 
--- TODO add a diagram to illustrate how these resources would be used
+> **TODO:** Add a diagram to illustrate resource relationships and usage.
 
+## Alternatives Considered
+
+- Embedding provider metadata directly in `APIExport` (less flexible, harder to reuse).
+- Duplicating UI configuration in each workspace (leads to drift and maintenance overhead).
+
+
+## References
+
+- [KCP Documentation](https://github.com/kcp-dev/kcp)
+- [OpenMFP Documentation](https://github.com/openmfp/openmfp)
+- [Kubernetes API Conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
