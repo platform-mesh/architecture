@@ -90,7 +90,7 @@ spec:
 
 - Provider UI configuration should be co-located with other provider resources in the same workspace as the `APIExport`.
 - OpenMFP uses `ContentConfiguration` resources for UI configuration; these should not be duplicated across workspaces.
-- Introduce a binding resource, similar to `APIBinding`, to reference a shared `ContentConfiguration`.
+- Make use of the already existing binding relation (`APIBinding`) between the api export in the workspace. This is beneficial over adding a binding resource for the content configuration.
 
 **Example: ContentConfiguration**
 ```yaml
@@ -98,6 +98,8 @@ apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfiguration
 metadata:
   name: acme.provider.io
+  labels:
+    ui.platform-mesh.io/content-for: "acme.example.corp"
 spec:
   # Either inline or remote configuration can be used.
   inlineConfiguration:
@@ -110,26 +112,21 @@ spec:
     url: "https://my-ui.com/config.json"
     contentType: json
 ```
+**Overview**
 
-**Example: ContentConfigurationBinding**
-```yaml
-apiVersion: ui.platform-mesh.io/v1alpha1
-kind: ContentConfigurationBinding
-metadata:
-  name: acme.provider.io
-spec:
-  reference:
-    export:
-      name: acme.provider.io
-      path: root:providers:acme-provider:acme.provider.io
-```
+![diagram](./assets/entities.png)
 
-> **TODO:** Add a diagram to illustrate resource relationships and usage.
+
+## Operators and Services and their use of the new Resources
+
+The diagram below illustrates on a high level what other components will use the new resources:
+![diagram](./assets/container-diagram.png)
 
 ## Alternatives Considered
 
 - Embedding provider metadata directly in `APIExport` (less flexible, harder to reuse).
 - Duplicating UI configuration in each workspace (leads to drift and maintenance overhead).
+- Using separate binding resources for UI configuration (unnecessary complexity).
 
 
 ## References
