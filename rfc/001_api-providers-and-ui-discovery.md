@@ -91,6 +91,8 @@ spec:
 - Provider UI configuration should be co-located with other provider resources in the same workspace as the `APIExport`.
 - OpenMFP uses `ContentConfiguration` resources for UI configuration; these should not be duplicated across workspaces.
 - Make use of the already existing binding relation (`APIBinding`) between the api export in the workspace. This is beneficial over adding a binding resource for the content configuration.
+- The ContentConfiguration resource can act as a UI configuration for a APIExport, but we should also support ContentConfigurations without API relation. 
+  In that situation we still need to create a releation to the ProvderMetadata for example for future "help center" features. in order to route users to a page specific help content.
 
 **Example: ContentConfiguration**
 ```yaml
@@ -98,8 +100,14 @@ apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfiguration
 metadata:
   name: acme.provider.io
+   # The following labels / annotations (/content-for, /metadata) are mutually exclusive, if both are set the ProviderMetadata will be used via the APIExport.
+   # The following label would be set to relate the ContentConfiguration to an APIExport.
   labels:
-    ui.platform-mesh.io/content-for: "acme.example.corp"
+    ui.platform-mesh.ui/entity: account # this is the matching ui entity e.g. if a UI should be visible on the global or account level. 
+    # ui.platform-mesh.io/content-for: "acme.example.corp"
+  # The following annotaton would be set to relate the ContentConfiguration to an ProviderMetadata 
+  # annotations:
+    # ui.platform-mesh.io/metadata: "acme.example.corp"
 spec:
   # Either inline or remote configuration can be used.
   inlineConfiguration:
@@ -112,15 +120,26 @@ spec:
     url: "https://my-ui.com/config.json"
     contentType: json
 ```
+
+For the case where we have a standalone `ContentConfiguration` we need to be able to find the relevant `ProviderMetadata` for a given `ContentConfiguration`. 
+Here we can use a `ui.platform-mesh.io/metadata` annotation to get the matching `ProviderMetadata` resource.
+
 **Overview**
 
 ![diagram](./assets/entities.png)
 
+## ContentConfiguration Locations and how to gather the applicable ContentConfigurations
+
+The below diagram illustrates various examples of how the `ContentConfiguration` resources can be located and how they relate to the `APIExport` and `ProviderMetadata` resources.
+
+![diagram](./assets/content-configuration-examples.png)
 
 ## Operators and Services and their use of the new Resources
 
 The diagram below illustrates on a high level what other components will use the new resources:
 ![diagram](./assets/container-diagram.png)
+
+
 
 ## Alternatives Considered
 
