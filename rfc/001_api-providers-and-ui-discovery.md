@@ -36,14 +36,14 @@ This RFC proposes solutions to address these gaps, some of which may be candidat
 - Metadata should be optional, as not all APIs require a provider or relevant metadata.
 - A provider may own multiple `APIExport` resources; thus, metadata should be a separate resource, referenced from `APIExport`.
 
-#### New Resource: `APIProvider`
+#### New Resource: `ProviderMetadata`
 
-Introduce an `APIProvider` resource to store provider metadata. It should be possible to associate an `APIProvider` with an `APIExport` via an optional field, label, or annotation.
+Introduce an `ProviderMetadata` resource to store provider metadata. It should be possible to associate an `ProviderMetadata` with an `APIExport` via an optional field, label, or annotation.
 
 **Example:**
 ```yaml
 apiVersion: api.platform-mesh.io/v1alpha1
-kind: APIProvider
+kind: ProviderMetadata
 metadata:
   name: acme-example-provider
 spec:
