@@ -1,4 +1,4 @@
-# RFC: API Provider Data and Provider UI Discovery in Platform Mesh
+# RFC 001: API Provider Data and Provider UI Discovery in Platform Mesh
 
 | Status  | Proposed                                                     |
 |---------|--------------------------------------------------------------|
@@ -9,6 +9,12 @@
 ## Summary
 
 This RFC proposes a mechanism for managing API provider metadata and UI discovery within Platform Mesh. It introduces new resources to address gaps in KCP's core resources, enabling richer provider metadata, controlled API binding, and dynamic UI integration for workspaces.
+
+## Motivation
+
+- Enhance discoverability and management of API providers.
+- Enable fine-grained control over which workspaces can bind to specific APIs.
+- Support dynamic UI integration for providers within the portal.
 
 ## Context and Problem Statement
 
@@ -22,12 +28,6 @@ However, several concerns are not addressed by these core resources:
 
 This RFC proposes solutions to address these gaps, some of which may be candidates for KCP core, while others remain platform-mesh specific.
 
-## Motivation
-
-- Enhance discoverability and management of API providers.
-- Enable fine-grained control over which workspaces can bind to specific APIs.
-- Support dynamic UI integration for providers within the portal.
-
 ## Proposal
 
 ### API Provider Metadata
@@ -38,7 +38,7 @@ This RFC proposes solutions to address these gaps, some of which may be candidat
 
 #### New Resource: `ProviderMetadata`
 
-Introduce an `ProviderMetadata` resource to store provider metadata. It should be possible to associate an `ProviderMetadata` with an `APIExport` via an optional field, label, or annotation.
+Introduce a `ProviderMetadata` resource to store provider metadata. It should be possible to associate a `ProviderMetadata` with an `APIExport` via an optional field, label, or annotation.
 
 **Example:**
 ```yaml
@@ -90,10 +90,9 @@ spec:
 
 - Provider UI configuration should be co-located with other provider resources in the same workspace as the `APIExport`.
 - OpenMFP uses `ContentConfiguration` resources for UI configuration; these should not be duplicated across workspaces.
-- Make use of the already existing binding relation (`APIBinding`) between the api export in the workspace. This is beneficial over adding a binding resource for the content configuration.
-- The ContentConfiguration resource can act as a UI configuration for a APIExport, but we should also support ContentConfigurations without API relation. 
-  In that situation we still need to create a releation to the ProvderMetadata for example for future "help center" features. in order to route users to a page specific help content.
-- The ContentConfiguration relates to Cluster level resources, such as `APIExport` therefore should also be a cluster scoped resource. The ContentConfiguration is also used in other cases on normal kubernetes without kcp. In that case it needs to be possible to also use it in a namespaced manner.
+- Use the existing binding relation (`APIBinding`) between the API export and the workspace. This is preferable to adding a binding resource for the content configuration.
+- The `ContentConfiguration` resource can act as a UI configuration for an `APIExport`, but we should also support `ContentConfigurations` without an API relation. In that situation, we still need to create a relation to the `ProviderMetadata` (e.g., for future "help center" features to route users to page-specific help content).
+- The `ContentConfiguration` relates to cluster-level resources, such as `APIExport`, and therefore should also be a cluster-scoped resource. The `ContentConfiguration` is also used in other cases on normal Kubernetes without KCP. In that case, it needs to be possible to also use it in a namespaced manner.
 
 **Example: ContentConfiguration**
 ```yaml
@@ -101,12 +100,13 @@ apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfiguration
 metadata:
   name: acme.provider.io
-   # The following labels / annotations (/content-for, /metadata) are mutually exclusive, if both are set the ProviderMetadata will be used via the APIExport.
-   # The following label would be set to relate the ContentConfiguration to an APIExport.
+  # The following labels / annotations (/content-for, /metadata) are mutually exclusive.
+  # If both are set, the ProviderMetadata will be used via the APIExport.
+  # The following label would be set to relate the ContentConfiguration to an APIExport.
   labels:
-    ui.platform-mesh.ui/entity: account # this is the matching ui entity e.g. if a UI should be visible on the global or account level. 
+    ui.platform-mesh.ui/entity: account # this is the matching UI entity, e.g., if a UI should be visible on the global or account level.
     # ui.platform-mesh.io/content-for: "acme.example.corp"
-  # The following annotaton would be set to relate the ContentConfiguration to an ProviderMetadata 
+  # The following annotation would be set to relate the ContentConfiguration to a ProviderMetadata 
   # annotations:
     # ui.platform-mesh.io/metadata: "acme.example.corp"
 spec:
@@ -122,26 +122,27 @@ spec:
     contentType: json
 ```
 
-For the case where we have a standalone `ContentConfiguration` we need to be able to find the relevant `ProviderMetadata` for a given `ContentConfiguration`. 
-Here we can use a `ui.platform-mesh.io/metadata` annotation to get the matching `ProviderMetadata` resource.
+For the case where we have a standalone `ContentConfiguration`, we need to be able to find the relevant `ProviderMetadata` for a given `ContentConfiguration`. Here we can use a `ui.platform-mesh.io/metadata` annotation to get the matching `ProviderMetadata` resource.
 
 **Overview**
 
 ![diagram](./assets/entities.png)
+*Figure 1: Entity relationship diagram showing how ProviderMetadata, APIExport, ContentConfiguration, and APIBinding resources are related within Platform Mesh. This illustrates the connections between provider metadata, API exports, UI configurations, and workspace bindings.*
 
-## ContentConfiguration Locations and how to gather the applicable ContentConfigurations
+## ContentConfiguration Locations and How to Gather the Applicable ContentConfigurations
 
-The below diagram illustrates various examples of how the `ContentConfiguration` resources can be located and how they relate to the `APIExport` and `ProviderMetadata` resources.
+The diagram below illustrates various examples of how the `ContentConfiguration` resources can be located and how they relate to the `APIExport` and `ProviderMetadata` resources.
 
 ![diagram](./assets/content-configuration-examples.png)
+*Figure 2: Example scenarios of ContentConfiguration placement and their relationships to APIExport and ProviderMetadata resources. This demonstrates different ways UI configurations can be associated with providers and APIs across workspaces.*
 
-The platform mesh service would need to follow the following sequence of actions to gather all relevant `ContentConfiguration` resources:
+The Platform Mesh service would need to follow the following sequence of actions to gather all relevant `ContentConfiguration` resources:
 ```mermaid
 sequenceDiagram
   participant u as User
   participant p as Portal
   participant pms as Platform Mesh Provider Service
-  
+
   u->>p: access specific account<br>path :root:orgs:a:a
   p->>pms: get contentconfigurations for<br>path :root:orgs:a:a
   pms->>kcp: get api bindings in account a
@@ -151,23 +152,26 @@ sequenceDiagram
   pms->>kcp: check in platform mesh provider workspace <br>if there are contentconfigurations for the account entity
   pms-->>p: return all contentconfigurations
   p-->>u: display respective nodes <br>based on contentconfigurations
-    
 ```
 
-## Operators and Services and their use of the new Resources
+## Operators and Services and Their Use of the New Resources
 
-The diagram below illustrates on a high level what other components will use the new resources:
+The diagram below illustrates at a high level what other components will use the new resources:
+
 ![diagram](./assets/container-diagram.png)
-
-
+*Figure 3: High-level container diagram showing which Platform Mesh components (such as the portal, provider service, and KCP) interact with ProviderMetadata and ContentConfiguration resources. This highlights the flow of metadata and UI configuration through the system.*
 
 ## Alternatives Considered
 
 - Embedding provider metadata directly in `APIExport` (less flexible, harder to reuse).
 - Duplicating UI configuration in each workspace (leads to drift and maintenance overhead).
 - Using separate binding resources for UI configuration (unnecessary complexity).
- 
 
+## Drawbacks
+
+- Introduces new resource types and relationships, increasing system complexity.
+- Requires additional logic for discovery and reconciliation of metadata and UI configuration.
+- Potential for misconfiguration if labels/annotations are not used consistently.
 
 ## References
 
