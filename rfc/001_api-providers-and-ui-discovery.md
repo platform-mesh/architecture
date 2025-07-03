@@ -134,6 +134,25 @@ The below diagram illustrates various examples of how the `ContentConfiguration`
 
 ![diagram](./assets/content-configuration-examples.png)
 
+The platform mesh service would need to follow the following sequence of actions to gather all relevant `ContentConfiguration` resources:
+```mermaid
+sequenceDiagram
+  participant u as User
+  participant p as Portal
+  participant pms as Platform Mesh Provider Service
+  
+  u->>p: access specific account<br>path :root:orgs:a:a
+  p->>pms: get contentconfigurations for<br>path :root:orgs:a:a
+  pms->>kcp: get api bindings in account a
+  pms->>kcp: get matching api exports for each apibinding
+  pms->>kcp: check if there are contentconfigurations <br>for each api export
+  pms->>kcp: check in the account workspace <br> if there are contentconfigurations
+  pms->>kcp: check in platform mesh provider workspace <br>if there are contentconfigurations for the account entity
+  pms-->>p: return all contentconfigurations
+  p-->>u: display respective nodes <br>based on contentconfigurations
+    
+```
+
 ## Operators and Services and their use of the new Resources
 
 The diagram below illustrates on a high level what other components will use the new resources:
@@ -146,6 +165,7 @@ The diagram below illustrates on a high level what other components will use the
 - Embedding provider metadata directly in `APIExport` (less flexible, harder to reuse).
 - Duplicating UI configuration in each workspace (leads to drift and maintenance overhead).
 - Using separate binding resources for UI configuration (unnecessary complexity).
+ 
 
 
 ## References
