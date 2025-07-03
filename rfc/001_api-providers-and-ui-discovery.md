@@ -93,6 +93,7 @@ spec:
 - Make use of the already existing binding relation (`APIBinding`) between the api export in the workspace. This is beneficial over adding a binding resource for the content configuration.
 - The ContentConfiguration resource can act as a UI configuration for a APIExport, but we should also support ContentConfigurations without API relation. 
   In that situation we still need to create a releation to the ProvderMetadata for example for future "help center" features. in order to route users to a page specific help content.
+- The ContentConfiguration relates to Cluster level resources, such as `APIExport` therefore should also be a cluster scoped resource. The ContentConfiguration is also used in other cases on normal kubernetes without kcp. In that case it needs to be possible to also use it in a namespaced manner.
 
 **Example: ContentConfiguration**
 ```yaml
