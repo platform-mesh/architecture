@@ -78,7 +78,7 @@ POST _bulk
 { "namespace": "default", "APIResourceSchemaName": "MyCustomAPI", "someDomainSpecificField": 123 }
 { "create": { "_index": ":root:orgs:organization:account2:workspace-2.1", "_id": "1" } }
 { "namespace": "default", "APIResourceSchemaName": "MyCustomAPI", "someDomainSpecificField": 456 }
-{ "create": { "_index": ":root:orgs:organization:account2:workspace-2.1", "_id": "1" } }
+{ "create": { "_index": ":root:orgs:organization:account2:workspace-2.1", "_id": "2" } }
 { "namespace": "default", "APIResourceSchemaName": "OtherCustomAPI", "otherDomainSpecificField": true }
 ```
 
@@ -89,6 +89,15 @@ GET /_msearch
 { "query": { "match": { "APIResourceSchemaName": "MyCustomAPI" } }}
 { "index": ":root:orgs:organization:account2:workspace-2.1", "search_type": "dfs_query_then_fetch"}
 { "query": { "match": { "APIResourceSchemaName": "MyCustomAPI" } } }
+```
+
+Example OpenSearch query returning all entries for `account-2`:
+```json
+GET /_msearch
+{ "index": ":root:orgs:organization:account2"}
+{ "query": { "match_all": {} }}
+{ "index": ":root:orgs:organization:account2:workspace-2.1", "search_type": "dfs_query_then_fetch"}
+{ "query": { "match_all": {} } }
 ```
 
 * Good, because indexing and searching is guarded by openFGA on basis of KCP hierarchies
