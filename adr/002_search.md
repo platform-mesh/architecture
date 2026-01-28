@@ -48,63 +48,26 @@ TBD
 
 ### per-organization-search
 
-Each KCP workspace below a given organization has it's own search index (collection of documents belonging together) where the index name is the absolute path within KCP.
-This means that for all APIResourceSchemas that should be searchable living in workspaces below the organization need to be bound appropriately.
+TODO: where to configure kubectl automatically?
 
-```mermaid
-graph LR
-    A[organization] --- B[account-1]
-    A --- C[account-2]
-    B --- B1[workspace-1.1]
-    B --- B2[workspace-1.2]
-    C --- C1[workspace-2.1]
-    C --- C2[workspace-2.2]
-    B -->|apibindings| A
-    C -->|apibindings| A
-    B1 -->|apibindings| A
-    B2 -->|apibindings| A
-    C1 -->|apibindings| A
-    C2 -->|apibindings| A
-    linkStyle 0,1,2,3,4,5 stroke-width:3px
-    linkStyle 6,7,8,9,10,11 stroke-width:1px
-```
+1. We introduce a new workspacetype `search` that it extended by the [org](https://github.com/platform-mesh/platform-mesh-operator/blob/main/manifests/kcp/workspace-type-org.yaml) type
+2. We apply a APIResourceSchema `searchindex` as part in a custom setup script in helm-charts ([see example](local-setup/scripts/load-custom-images.sh.example))
+3. We add the resource to the [`core.platform-mesh.io`](https://github.com/platform-mesh/platform-mesh-operator/blob/main/manifests/kcp/01-platform-mesh-system/apiexport-core.platform-mesh.io.yaml) binding or create a new binding for search
+4. We add an initializer for new workspaces of type search
+    - creates a resource of APIResourceSchema `searchindex` in `root:platform-mesh-system`
+    - deletes initializer string
+5. Search Operator Reconciles `searchindex` resources in `root:platform-mesh-system`
+6. Feature toggles
 
-Every time a resource is indexed, an OpenFGA request asserts whether the user is allowed to do this operation (check whether the allowed absolute OpenFGA path matches the search index). When retrieving data the same procedure applies.
+#### setup validation
+`k get apiresourceschemas` // returns 
+`k get apibindings --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` //
+`k get serchindices --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` //
+`k api-resources --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/'` //
+`k get workspacetypes` // includes search
+`k get workspacetypes search -o yaml` // returns spec
+`k get workspacetypes org -o yaml` // extends security and search
 
-Example OpenSearch ingest of `account-2` and `workspace-2.1`:
-```json
-POST _bulk
-{ "create": { "_index": ":root:orgs:organization:account2", "_id": "1" } }
-{ "namespace": "default", "APIResourceSchemaName": "MyCustomAPI", "someDomainSpecificField": 123 }
-{ "create": { "_index": ":root:orgs:organization:account2:workspace-2.1", "_id": "1" } }
-{ "namespace": "default", "APIResourceSchemaName": "MyCustomAPI", "someDomainSpecificField": 456 }
-{ "create": { "_index": ":root:orgs:organization:account2:workspace-2.1", "_id": "2" } }
-{ "namespace": "default", "APIResourceSchemaName": "OtherCustomAPI", "otherDomainSpecificField": true }
-```
-
-Example OpenSearch query returning all `MyCustomAPI` entries for `account-2`:
-```json
-GET /_msearch
-{ "index": ":root:orgs:organization:account2"}
-{ "query": { "match": { "APIResourceSchemaName": "MyCustomAPI" } }}
-{ "index": ":root:orgs:organization:account2:workspace-2.1", "search_type": "dfs_query_then_fetch"}
-{ "query": { "match": { "APIResourceSchemaName": "MyCustomAPI" } } }
-```
-
-Example OpenSearch query returning all entries for `account-2`:
-```json
-GET /_msearch
-{ "index": ":root:orgs:organization:account2"}
-{ "query": { "match_all": {} }}
-{ "index": ":root:orgs:organization:account2:workspace-2.1", "search_type": "dfs_query_then_fetch"}
-{ "query": { "match_all": {} } }
-```
-
-* Good, because indexing and searching is guarded by openFGA on basis of KCP hierarchies
-* Good, because of high flexibility in search scopes
-* Good, because of distributed control over indexing
-* Bad, because you cannot search across organizations
-* Bad, because one logical OpenSearch instance needs to be configured per organization (resources or complexity increases)
 
 ### per-account-search
 
