@@ -61,10 +61,10 @@ TODO: where to configure kubectl automatically?
 
 #### setup validation
 `k get apiresourceschemas` // returns 
-`k get apibindings --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` //
-`k get serchindices --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` //
-`k api-resources --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/'` //
-`k get workspacetypes` // includes search
+`k get apibindings --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` // should list bindings of all orgs
+`k get searchindices --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` // should not fail (e.g. `No resources found`)
+`k api-resources --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/'` // 
+`k get workspacetypes` // includes searchindices
 `k get workspacetypes search -o yaml` // returns spec
 `k get workspacetypes org -o yaml` // extends security and search
 
