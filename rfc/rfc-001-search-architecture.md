@@ -84,53 +84,6 @@ The `SearchIndex` resource is exposed through the `core.platform-mesh.io` APIExp
 **Kind**: `SearchIndex`
 **Scope**: Cluster
 
-```yaml
-apiVersion: core.platform-mesh.io/v1alpha1
-kind: SearchIndex
-metadata:
-  name: org-search-index
-spec:
-  # Optional prefix for the OpenSearch index name
-  # Defaults to the organization workspace path
-  indexPrefix: "my-org"
-
-  # Pause indexing without deleting the index
-  paused: false
-
-  # List of resources to track and index
-  trackedResources:
-    - group: core.platform-mesh.io
-      version: v1alpha1
-      kind: Account
-    - group: ui.platform-mesh.io
-      version: v1alpha1
-      kind: Component
-    - group: ui.platform-mesh.io
-      version: v1alpha1
-      kind: Team
-
-status:
-  # Actual OpenSearch index name
-  indexName: "root-org-my-org-index"
-
-  # Total documents indexed
-  documentCount: 1234
-
-  # Last successful sync timestamp
-  lastSyncTime: "2026-02-17T10:30:00Z"
-
-  # Conditions following Kubernetes conventions
-  conditions:
-    - type: Ready
-      status: "True"
-      reason: IndexHealthy
-      message: "Search index is operational"
-    - type: Syncing
-      status: "False"
-      reason: SyncCompleted
-      message: "All tracked resources indexed"
-```
-
 ### Workspace Integration
 
 #### Workspace Type Extension (POC Phase)
