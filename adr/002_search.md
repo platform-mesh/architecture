@@ -13,6 +13,8 @@ informed: {tjbutz}
 
 Currently Platform Mesh does not enable advanced searching such as partial word searches, fuzzy search, or semantic search. That means that every user has to come up with it's own search architecture and permission management within the search and search index.
 
+![Search Architecture](images/002_search_architecture.png)
+
 ### Prerequisites
 
 What needs to be in place before implementation can start:
@@ -48,26 +50,51 @@ TBD
 
 ### per-organization-search
 
-TODO: where to configure kubectl automatically?
+Each organization has it's own index and narrowing search down the hierarchy is configured via filters (e.g. one dedicated field holding the kcp subpath).
 
-1. We introduce a new workspacetype `search` that it extended by the [org](https://github.com/platform-mesh/platform-mesh-operator/blob/main/manifests/kcp/workspace-type-org.yaml) type
-2. We apply a APIResourceSchema `searchindex` as part in a custom setup script in helm-charts ([see example](local-setup/scripts/load-custom-images.sh.example))
-3. We add the resource to the [`core.platform-mesh.io`](https://github.com/platform-mesh/platform-mesh-operator/blob/main/manifests/kcp/01-platform-mesh-system/apiexport-core.platform-mesh.io.yaml) binding or create a new binding for search
-4. We add an initializer for new workspaces of type search
+#### Roadmap
+
+##### Hackathon Stage
+* SearchIndex CRD + Search Operator + OpenSearch integration
+* Added to `core.platform-mesh.io` APIExport
+* Apply a APIResourceSchema `searchindex` as part in a custom setup script in helm-charts ([see example](local-setup/scripts/load-custom-images.sh.example))
+* **Repositories**:
+  - `platform-mesh-hackathon-0126/helm-charts`
+  - `platform-mesh/search-operator`
+* **Key files**:
+  - `local-setup/hsp/root/platform-mesh-system/apiresourceschema-searchindices.core.platform-mesh.io.yaml`
+  - `local-setup/hsp/root/platform-mesh-system/apiexport-core.platform-mesh.io.yaml`
+  - `charts/search-operator/`
+  - `local-setup/hsp/deployments/opensearch/`
+
+##### POC Next Steps
+1. Workspacetype `search` extended by the [org](https://github.com/platform-mesh/platform-mesh-operator/blob/main/manifests/kcp/workspace-type-org.yaml) type
+    - [`platform-mesh/platform-mesh-operator`](https://github.com/platform-mesh/platform-mesh-operator/pull/335/changes)
+2. Initializer for auto-creating SearchIndex resources
     - creates a resource of APIResourceSchema `searchindex` in `root:platform-mesh-system`
     - deletes initializer string
-5. Search Operator Reconciles `searchindex` resources in `root:platform-mesh-system`
-6. Feature toggles
+    - `charts/search-operator/templates/initializer-deployment.yaml`
+3. Operator reconciliation logic for indexing
+    - `search-operator` repository (unstructured operator configurable via yaml config)
+    - Discover Resources via reading export (either core-platform-mesh for now or dedicated search export)
 
-#### setup validation
+##### Platform Mesh integration
+
+1. Move existing changes to `github.com/platform-mesh`
+2. Discover Indexable Resources and index per organization (fga in mind)
+3. Search endpoint
+
+#### validation steps
+in `:root:platform-mesh-system`:
 `k get apiresourceschemas` // returns 
 `k get apibindings --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` // should list bindings of all orgs
 `k get searchindices --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' -A` // should not fail (e.g. `No resources found`)
 `k api-resources --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/'` // 
+
+In `:root`:
 `k get workspacetypes` // includes searchindices
 `k get workspacetypes search -o yaml` // returns spec
 `k get workspacetypes org -o yaml` // extends security and search
-
 
 ### per-account-search
 
