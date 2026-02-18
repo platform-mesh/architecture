@@ -13,7 +13,7 @@ informed: {tjbutz}
 
 ## Context and Problem Statement
 
-Currently Platform Mesh does not enable advanced searching such as partial word searches, fuzzy search, or semantic search. That means that every user has to come up with it's own search architecture and permission management within the search and search index.
+Currently Platform Mesh does not enable advanced searching such as partial word searches, fuzzy search, or semantic search. Additionally, using the K8s/KCP APIs directly is not a valid approach at scale, as the K8s/KCP gateway is too slow to query thousands of entries and lacks proper pagination. That means that every user has to come up with it's own search architecture and permission management within the search and search index.
 
 ### Prerequisites
 

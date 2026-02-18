@@ -51,7 +51,7 @@ Platform Mesh provides a KRM-based API surface through KCP, but lacks built-in s
 
 The search architecture consists of four main components:
 
-1. **SearchIndex APIResourceSchema**: Declares what index is used organization
+1. **SearchIndex APIResourceSchema**: Declares what index is used per organization
 2. **Search Operator**: Reconciles/Initializes SearchIndex resources and manages indexing
 3. **OpenSearch**: Backend search engine storing indexed documents
 4. **Authorization Layer**: OpenFGA integration for filtering search results
