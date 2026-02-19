@@ -171,7 +171,7 @@ components:
           type: gitHub
 ```
 
-**Chart component (updated, replaces inline image with componentReference):**
+**Software component (updated, chart resource + image componentReference):**
 
 ```yaml
 components:
@@ -201,6 +201,16 @@ components:
           type: gitHub
 ```
 
+### Software Component Versioning
+
+Image components and chart resources are versioned independently. The aggregator (`platform-mesh/ocm`) calculates the software component version by comparing old and new dependency versions, determining the semver bump level (patch/minor/major), and applying the same bump to the software component. If both dependencies changed, the higher bump wins. The version continues from the current value — no reset on adoption.
+
+| Change | Dependency delta | Software component delta |
+|--------|-----------------|--------------------------|
+| Image patch | `v0.10.9` → `v0.10.10` | `0.42.3` → `0.42.4` |
+| Chart minor | `0.19.16` → `0.20.0` | `0.42.4` → `0.43.0` |
+| Image major + chart patch | `v0.10.10` → `v1.0.0` + `0.20.0` → `0.20.1` | `0.43.0` → `1.0.0` (major wins) |
+
 ### Decoupling Chart Releases from Image Releases
 
 Once image OCM components are created in the source-repo pipeline, the chart no longer needs to know the exact image version at build time. Today the flow is:
@@ -217,7 +227,7 @@ With the new model, the image version is captured in the image OCM component, an
 * **OCM aggregator builds new platform-mesh versions** — the aggregator resolves the latest versions of all image and chart components and builds a new platform-mesh aggregate. This happens both when an image is published (triggered by source repo) and when a chart is released (triggered by chart pipeline).
 * **`appVersion` in Chart.yaml becomes informational** — It no longer drives the image tag used at deployment time.
 
-**Trade-off:** Updating `appVersion` on every image release is common practice in many Helm charts and provides a useful signal about which image version a chart was last tested with. On the other hand, it artificially inflates chart versions without any actual chart changes. With OCM as the authoritative source for version resolution, the `appVersion` field loses its operational role and the trade-off favors fewer, more meaningful chart releases.
+**Trade-off:** Updating `appVersion` on every image release is common practice in many Helm charts and provides a useful signal about which image version a chart was last tested with. On the other hand, it artificially inflates chart versions without any actual chart changes. With OCM as the authoritative source for version resolution, the `appVersion` field loses its operational role and the trade-off favors fewer, more meaningful chart releases. While `appVersion` is removed from chart version coupling, the software component version tracked by the aggregator provides equivalent traceability — querying the OCM component always reveals which chart and image versions it bundles.
 
 ### Third-Party / Upstream Images
 
