@@ -30,8 +30,6 @@ type core_platform-mesh_io_account
   relations
     define parent: [core_platform-mesh_io_account]
     define bind: [apis_kcp_io_apiexport] or bind from parent
-
-    ... existing relations unchanged ...
 ```
 
 This schema update will make us able to allow apiExport binding for some specific account and all it's child accounts. The organization is also an account, so to allow binding for every account in some organization, a platform-mesh administrator need to set organization's account name.
@@ -70,11 +68,6 @@ status:
   conditions:
     - type: Ready
       status: "True"
-  writtenTuples:
-    - storeId: <fga-store-id>
-      object: "core_platform-mesh_io_account:2y7sraiyqfh5gv4r/katalis"
-      relation: "bind"
-      user: "apis_kcp_io_apiexport:<provider-cluster>/orchestrate.platform-mesh.io"
 ```
 
 The `Binding` CRD is auto-created when an APIExport gets the `platform-mesh.io/bindable: "true"` label, and deleted when the label is removed. The security operator sets `allWorkspaces` or `workspaces` to control access and resolves each workspace’s FGA store and root account via AccountInfo using `clusterId`.
@@ -97,16 +90,16 @@ spec:
       clusterId: 1ltwhrw6dhz756w2
 ```
 
-**Stored tuples** (one per listed workspace, written to that workspace’s FGA store; object is the root account for the workspace so `bind from parent` gives all accounts in the workspace access):
+**Stored tuples** (one per listed workspace, written to that workspace’s FGA store; object is the organization account so `bind from parent` gives all accounts in the workspace access):
 
 ```
 # In org_account workspace store:
-object:   core_platform-mesh_io_account:2y7sraiyqfh5gv4r/katalis
+object:   core_platform-mesh_io_account:2y7sraiyqfh5gv4r/orgname
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 
 # In user_account workspace store:
-object:   core_platform-mesh_io_account:1ltwhrw6dhz756w2/partner
+object:   core_platform-mesh_io_account:1ltwhrw6dhz756w2/username
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ```
@@ -114,7 +107,7 @@ user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 **Authz check** :
 
 ```
-Store:    org workspace FGA store
+Store:    consumer's FGA store
 Object:   core_platform-mesh_io_account:<consumer-cluster>/<consumer-account>
 Relation: bind
 User:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
@@ -165,12 +158,11 @@ Tuple cost: 1 tuple per workspace store. At 100 workspaces = 100 total stored tu
 
 ### Binding controller
 
-- New controller/subroutine that watches `Binding` CRDs
+- New controller that watches `Binding` CRDs
 - For each `Binding`, determines target FGA stores:
   - If `allWorkspaces` is set: enumerates all workspace stores (e.g. via existing Store CRDs or by direct OpenFGA call)
   - If `workspaces` is set: for each entry, resolves the workspace by `clusterId` → AccountInfo → `Spec.FGA.Store.Id`
 - Writes one bind tuple per target (object = account, relation = bind, user = apiexport) directly to FGA via gRPC
-- Tracks written tuples in `Binding.Status.WrittenTuples` for cleanup. If initially for apiExport: X binding was allowed for every organization and it was changed to a list of accounts, it's required to cleanup remaining tupels from unspecified accounts and vice versa
 - When `allWorkspaces` / `workspaces` change or `Binding` is deleted: removes stale tuples from FGA
 
 ### Authorization Webhook
@@ -203,6 +195,4 @@ Check(
 | All workspaces (`allWorkspaces`) | 1 per known workspace | each workspace's FGA store |
 
 ## Open Considerations
-
-- **New workspace creation**: when `allWorkspaces` is set and a new workspace is created, the security-operator must detect the new store and write the bind tuple (e.g. re-reconcile all Bindings with `allWorkspaces` when a new Store is created).
-- **Workspace-level restrictions**: a future iteration could allow workspace admins to remove the bind tuple from their own store, effectively opting out.
+- **Workspace-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
