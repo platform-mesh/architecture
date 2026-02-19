@@ -56,7 +56,50 @@ The search architecture consists of four main components:
 3. **OpenSearch**: Backend search engine storing indexed documents
 4. **Authorization Layer**: OpenFGA integration for filtering search results
 
-![search-architecture](rfc-001-search-architecture.md)
+**Architecture Diagram**:
+
+```mermaid
+graph TB
+    subgraph KCP["KCP Workspaces"]
+        OrgSAP["Org Workspace<br/>(root:org:sap)<br/>- Components<br/>- Namespaces<br/>- Accounts"]
+        OrgACME["Org Workspace<br/>(root:org:acme)<br/>- Components<br/>- Namespaces<br/>- Accounts"]
+    end
+
+    SearchOp["Search Operator<br/>- Watches resources<br/>- Transforms to docs<br/>- Manages indices"]
+    OpenSearch["OpenSearch<br/>- Per-org indices<br/>- Full-text search<br/>- Fuzzy matching"]
+    SearchService["Search Service (Future)<br/>- REST API<br/>- FGA filtering<br/>- Contextual tuples"]
+    Clients["UI / API Clients<br/>- Portal<br/>- CLI tools<br/>- Third-party apps"]
+    FGA["OpenFGA<br/>- Authorization<br/>- Hierarchy-aware"]
+
+    OrgSAP -->|Resource Events| SearchOp
+    OrgACME -->|Resource Events| SearchOp
+    SearchOp -->|Index/Update/Delete| OpenSearch
+    SearchService -->|Query Results| OpenSearch
+    SearchService -->|Batch Check Calls<br/>with contextual tuples| FGA
+    FGA -->|Authorization Result| SearchService
+    Clients -->|Search Request| SearchService
+
+    style SearchService fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
+    style KCP fill:#e1f5ff,stroke:#333,stroke-width:2px
+```
+
+**Component Interaction Flow**:
+
+1. **Indexing Phase** (handled by Search Operator):
+   - Search Operator watches KCP resources across workspaces
+   - Transforms resources into search documents
+   - Indexes them into per-organization OpenSearch indices
+   - This happens continuously as resources are created/updated/deleted
+
+2. **Search Phase** (handled by Search Service):
+   - Users send search queries via Search Service (or directly to OpenSearch in POC)
+   - Search Service queries OpenSearch and retrieves matching results
+   - Results are filtered via OpenFGA batch checks with contextual tuples
+   - Only authorized results are returned to the user
+
+3. **Authorization**: Each search result is validated against FGA with hierarchy information (account, namespace) passed as contextual tuples
+
+**Note**: Indexing and searching are completely separate concerns. The Search Operator handles all indexing operations, while the Search Service is only responsible for querying and authorization. In Phase 1 (POC), UIs/clients may query OpenSearch directly. The Search Service as a dedicated component is planned to provide a unified REST API, proper FGA integration, and additional features like query transformation and result ranking.
 
 ### SearchIndex Resource Schema
 
@@ -124,7 +167,7 @@ When a new organization workspace is created:
 
 The search operator is responsible for:
 
-1. **Resource Discovery**: Read APIExports to discover available resources
+1. **Resource Indexing**: Index resources from defined APIExports
 2. **Watch Management**: Establish watches on tracked resources
 3. **Document Indexing**: Transform KRM resources to search documents
 4. **Index Lifecycle**: Create, update, delete OpenSearch indices
@@ -136,13 +179,27 @@ The search operator is responsible for:
 - Uses KCP kubeconfig for multi-workspace access
 - Maintains one OpenSearch index per organization
 
+**Phase 1 Scope - Static Resource Types**:
+
+In the initial phase, the search operator works against a defined APIExport (e.g., `core.platform-mesh.io`) with known resource types that are explicitly configured for indexing. The operator is configured to index specific resource types such as:
+- `Component`
+- `Account`
+- `Namespace`
+- Other core resources as defined
+
+**Future Scope - Dynamic Resource Discovery**:
+
+Dynamic discovery of resources (reading APIExports to automatically discover available resources, handling providers that are added dynamically) is out of scope for the initial implementation and will be addressed in future iterations.
+
 **Document Structure**:
 
-Each indexed resource is stored as a JSON document:
+Each indexed resource is stored as a JSON document containing:
+- Full resource metadata (name, namespace, labels, annotations)
+- Workspace path information (for organization isolation)
+- Resource hierarchy data (account, namespace) needed for contextual tuple construction
+- Relevant spec fields for search
 
-TODO: come up with structure as requirements demand it
-
-For the POC the structure will be just the APIResource as it is in JSON format.
+For the POC, the structure will be the complete APIResource as JSON format, ensuring all information needed for FGA contextual tuples is available.
 
 ### OpenSearch Backend
 
@@ -168,11 +225,11 @@ opensearch:
 
 ### Authorization Integration
 
-Search results are filtered based on OpenFGA tuples:
+Search results are filtered based on OpenFGA tuples with contextual tuples for hierarchy-aware permissions:
 
 1. User queries search endpoint (future work)
 2. Search operator queries OpenSearch for matching documents
-3. For each result, check OpenFGA: `check(user, 'view', resource)`
+3. For each result, perform FGA batch check with contextual tuples: `batchCheck(user, 'view', resource, contextualTuples)`
 4. Return only authorized results
 
 **Authorization Flow**:
@@ -186,10 +243,55 @@ Search Operator
       ├─────▶ OpenSearch Query ────▶ Raw Results
       │                                    │
       └─────▶ OpenFGA Batch Check ◀───────┘
+                (with contextual tuples)
                      │
                      ▼
               Filtered Results
 ```
+
+**Contextual Tuples for Hierarchy-Aware Authorization**:
+
+Indexed documents contain all information needed to construct contextual tuples for FGA check calls. This allows the authorization layer to evaluate permissions based on the resource hierarchy without storing tuples for every resource-user combination.
+
+**Example: Component Resource**
+
+When a Component is indexed, the document contains:
+```json
+{
+  "kind": "Component",
+  "metadata": {
+    "name": "my-component",
+    "namespace": "my-namespace",
+    "labels": {
+      "account.platform-mesh.io/name": "my-account"
+    }
+  },
+  "workspacePath": "root:org:sap:account-my-account:namespace-my-namespace",
+  "spec": { ... }
+}
+```
+
+During search result authorization, the operator extracts hierarchy information and performs:
+```
+batchCheck([
+  {
+    user: "user:alice",
+    relation: "view",
+    object: "component:my-component",
+    contextual_tuples: [
+      { user: "component:my-component", relation: "namespace", object: "namespace:my-namespace" },
+      { user: "namespace:my-namespace", relation: "account", object: "account:my-account" }
+    ]
+  }
+])
+```
+
+This allows FGA to evaluate permissions like:
+- "Does Alice have view permission on the account?"
+- "Does Alice have view permission on the namespace?"
+- "Does Alice have direct view permission on the component?"
+
+The indexed document structure ensures all required hierarchy data (account, namespace, workspace path) is available for constructing these contextual tuples without additional API calls.
 
 ## Implementation Roadmap
 
