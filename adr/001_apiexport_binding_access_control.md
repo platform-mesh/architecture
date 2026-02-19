@@ -6,8 +6,8 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.** To opt in, the provider adds a label `platform-mesh.io/bindable: "true"` on the APIExport resource to make it bindable.
-2. A controller in security operator watches labeled APIExports and creates a `Binding` CRD in platform-mesh-system workspace containing the data needed for FGA tuple creation.
+1. **APIExports are not bindable by default.**. APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `Binding` resource for that APIExport
+2. Platform-mesh administrator configure `Binding` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
 3. The security-operator reconciles `Binding` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
 
@@ -15,7 +15,8 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 | Role | Responsibility |
 |---|---|
-| API Provider | Labels APIExport as bindable. No control over which orgs can bind. |
+| API Provider | Creates APIExport resource, have no control over bindability of his API. |
+| Platform-mesh Operator | Defines `Binding` resources controling which API's can be used in the organizations. |
 | Security Operator | Manages `Binding` resources in platform-mesh-system. Controls system-wide defaults and per-workspace access. |
 | Organization Admin | Can further restrict binding within their own org by creating `Binding` resource (future). |
 
@@ -38,14 +39,10 @@ TODO: add kcp schema example and more explanation based on it
 
 ## Binding CRD Schema
 
-All spec fields under access control are optional. Exactly one of `allWorkspaces` or `workspaces` must be set for the Binding to be valid.
-
-- **allWorkspaces**: when `true`, every workspace (every account in each workspace’s store) can bind this APIExport. One tuple is written per known workspace store.
-- **workspaces**: list of allowed workspaces by `name` and `clusterId`. The security-operator resolves each workspace’s AccountInfo to get the FGA store name or ID, then writes one bind tuple per listed workspace.
 
 ```yaml
 apiVersion: security.platform-mesh.io/v1alpha1
-kind: Binding
+kind: APIExportBinding
 metadata:
   name: orchestrate-platform-mesh-io
   namespace: platform-mesh-system
@@ -54,27 +51,32 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: <provider-logical-cluster-id>
 
-  # Option A: allow all workspaces (omit workspaces)
-  allWorkspaces: true
-
-  # Option B: allow specific workspaces only (omit allWorkspaces)
-  # workspaces:
-  #   - name: org_account
-  #     clusterId: 2y7sraiyqfh5gv4r
-  #   - name: user_account
-  #     clusterId: 1ltwhrw6dhz756w2
+  pathExpressions:
+    # path which ends on workspace name without :* should grant access only for one specific account and his child accounts should have no binding permissions
+    - root:orgs:default:abc
+    - root:orgs:default:cde 
+    # root:orgs:* -- allows binding for every organization
+    - root:orgs:*
+    # root:orgs:<org name>:* -- allows binding for all accounts within one organization
+    - root:orgs:demo:*
 
 status:
   conditions:
     - type: Ready
       status: "True"
+  # to efectivelly remove/add tuples if expressions have changed
+  managedExpressions:
+    - root:orgs:default:abc
+    - root:orgs:default:cde 
+    - root:orgs:*
+    - root:orgs:demo:*
 ```
 
-The `Binding` CRD is auto-created when an APIExport gets the `platform-mesh.io/bindable: "true"` label, and deleted when the label is removed. The security operator sets `allWorkspaces` or `workspaces` to control access and resolves each workspace’s FGA store and root account via AccountInfo using `clusterId`.
+The `APIExportBinding` CR is created by platform-mesh administrator. The security operator reconciles the `APIExportBinding` resource and creates required tuples.
 
 ## Scenarios
 
-### Scenario 1: Specific workspaces can bind an APIExport
+### Scenario 1: Specific paths can bind an APIExport
 
 **Configuration:**
 
@@ -83,28 +85,28 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
-  workspaces:
-    - name:  org_account
-      clusterId: 2y7sraiyqfh5gv4r
-    - name: user_account
-      clusterId: 1ltwhrw6dhz756w2
+  pathExpressions:
+    - root:orgs:default:*
+    - root:orgs:demo:*
 ```
 
-**Stored tuples** (one per listed workspace, written to that workspace’s FGA store; object is the organization account so `bind from parent` gives all accounts in the workspace access):
+The security-operator resolves each path expression to the corresponding workspace(s), then writes one bind tuple per resolved workspace into that workspace’s FGA store (object = root account for that path so `bind from parent` gives all accounts under that path access).
+
+**Stored tuples** (one per resolved workspace):
 
 ```
-# In org_account workspace store:
-object:   core_platform-mesh_io_account:2y7sraiyqfh5gv4r/orgname
+# In store for root:orgs:default
+object:   core_platform-mesh_io_account:<default-cluster-id>/default
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 
-# In user_account workspace store:
-object:   core_platform-mesh_io_account:1ltwhrw6dhz756w2/username
+# In store for root:orgs:demo
+object:   core_platform-mesh_io_account:<demo-cluster-id>/demo
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ```
 
-**Authz check** :
+**Authz check:**
 
 ```
 Store:    consumer's FGA store
@@ -113,9 +115,9 @@ Relation: bind
 User:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ```
 
-FGA evaluation: `bind from parent` traverses up to the root account for that workspace → root has the tuple → **allowed**. Any other workspace has no tuple → **denied**.
+FGA evaluation: `bind from parent` traverses up to the root account for that workspace → root has the tuple → **allowed**. Any path not in `pathExpressions` has no tuple → **denied**.
 
-### Scenario 2: Every workspace can bind an APIExport
+### Scenario 2: All orgs can bind an APIExport
 
 **Configuration:**
 
@@ -124,46 +126,36 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
-  allWorkspaces: true
+  pathExpressions:
+    - root:orgs:*
 ```
 
-**Stored tuples** (1 tuple per known workspace store):
+The security-operator resolves `root:orgs:*` to all workspaces under `root:orgs` and writes one bind tuple per workspace store.
+
+**Stored tuples** (1 tuple per known workspace under root:orgs):
 
 ```
-# In workspace-1 store:
-object:   core_platform-mesh_io_account:<cluster-1>/<org-account-name>
+# In each store:
+object:   core_platform-mesh_io_account:<org-workspace-cluster-id>/<org-workspace-name>
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
-
-# In workspace-2 store:
-object:   core_platform-mesh_io_account:<cluster-2>/<org-account-name>
-relation: bind
-user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
-
-# ... one per workspace
 ```
 
-**Authz check** from any account in any workspace: same as above; `bind from parent` reaches the root account that has the tuple → **allowed**.
+**Authz check** from any account in any matching workspace: same as above; `bind from parent` reaches the root account that has the tuple → **allowed**.
 
-Tuple cost: 1 tuple per workspace store. At 100 workspaces = 100 total stored tuples for one APIExport.
+Tuple cost: 1 tuple per resolved workspace store. For `root:orgs:*`, that is one per org workspace.
 
 ## Component Responsibilities
 
-### ApiExport Controller
+### platform-mesh operator/administrator
+- Creates `APIExportBinding` resources based on defined configuration, e.g. in helm-charts repo or by some admin view UI in future
 
-- Watches APIExport resources across all workspaces for the `platform-mesh.io/bindable` label
-- When an APIExport gains the label: creates a `Binding` CRD in platform-mesh-system with a default `allWorkspaces: true`
-- When the label is removed: deletes the `Binding` CRD
-- Does NOT write FGA tuples directly; that is the security-operator's job
+### APIExportBinding controller (security-operator)
 
-### Binding controller
-
-- New controller that watches `Binding` CRDs
-- For each `Binding`, determines target FGA stores:
-  - If `allWorkspaces` is set: enumerates all workspace stores (e.g. via existing Store CRDs or by direct OpenFGA call)
-  - If `workspaces` is set: for each entry, resolves the workspace by `clusterId` → AccountInfo → `Spec.FGA.Store.Id`
-- Writes one bind tuple per target (object = account, relation = bind, user = apiexport) directly to FGA via gRPC
-- When `allWorkspaces` / `workspaces` change or `Binding` is deleted: removes stale tuples from FGA
+- Watches `APIExportBinding` CRs in platform-mesh-system.
+- For each `APIExportBinding`, interprets `pathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
+- For each resolved workspace, looks up AccountInfo / FGA store and writes one bind tuple 
+- When `pathExpressions` change or `APIExportBinding` is deleted: removes stale tuples from FGA.
 
 ### Authorization Webhook
 
@@ -190,9 +182,10 @@ Check(
 
 | Scenario | Tuples per APIExport | Where |
 |---|---|---|
-| Not bindable (default) | 0 | nowhere |
-| Specific workspaces (`workspaces`) | 1 per listed workspace | each workspace's FGA store |
-| All workspaces (`allWorkspaces`) | 1 per known workspace | each workspace's FGA store |
+| No Binding / not bindable | 0 | nowhere |
+| All orgs (`pathExpressions`: e.g. `root:orgs:*`) | 1 per resolved workspace | each org’s FGA store |
+| Subtree (`pathExpressions`: e.g. `root:orgs:demo:*`) | 1 per resolved workspace under path | each matching FGA store |
 
 ## Open Considerations
 - **Workspace-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
+- **How to support binding permission for only one specigic account without child accounts**
