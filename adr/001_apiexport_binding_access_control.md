@@ -6,9 +6,9 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.**. APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `Binding` resource for that APIExport
-2. Platform-mesh administrator configure `Binding` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
-3. The security-operator reconciles `Binding` resources and writes tuples directly to the appropriate FGA stores.
+1. **APIExports are not bindable by default.**. APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportBinding` resource for that APIExport
+2. Platform-mesh administrator configure `APIExportBinding` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
+3. The security-operator reconciles `APIExportBinding` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
 
 ### Roles
@@ -16,9 +16,9 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 | Role | Responsibility |
 |---|---|
 | API Provider | Creates APIExport resource, have no control over bindability of his API. |
-| Platform-mesh Operator | Defines `Binding` resources controling which API's can be used in the organizations. |
-| Security Operator | Manages `Binding` resources in platform-mesh-system. Controls system-wide defaults and per-workspace access. |
-| Organization Admin | Can further restrict binding within their own org by creating `Binding` resource (future). |
+| Platform-mesh Operator | Defines `APIExportBinding` resources controling which API's can be used in the organizations. |
+| Security Operator | Reconcile `APIExportBinding` resources in platform-mesh-system |
+| Organization Admin | Can further restrict binding within their own org by creating `APIExportBinding` resource (future). |
 
 ## FGA Authorization Model Changes
 
