@@ -160,7 +160,7 @@ status:
 Because all `SearchIndex` resources live in `root:orgs`, only a single `APIBinding` is needed — in `root:orgs` itself. This is provisioned once by the platform-mesh-operator as part of infrastructure setup, not per individual org.
 
 ```yaml
-apiVersion: apis.kcp.io/v1alpha1
+apiVersion: apis.kcp.io/v1alpha2
 kind: APIBinding
 metadata:
   name: search.platform-mesh.io
@@ -176,24 +176,46 @@ spec:
       state: Accepted
 ```
 
-No changes to the `org` WorkspaceType are required. Individual org workspaces do not need their own `APIBinding` to `search.platform-mesh.io`.
+The org workspace onboarding path must include the search initializer. This can be done by targeting the org workspace type directly or by using an extension workspace type that carries the initializer.
 
-#### Automatic Initialization
+#### Initializer Registration
 
-The search operator watches `Workspace` resources in `root:orgs`. When a new org-type workspace appears, the operator creates a corresponding `SearchIndex` in `root:orgs`. This is an asynchronous, non-blocking watch — it does not use a KCP workspace initializer and does not delay workspace readiness.
+The search initializer must be attached to the org onboarding path via WorkspaceType configuration (directly on `org` or on an extension WorkspaceType inherited by `org`).
+
+Example:
+
+```yaml
+apiVersion: tenancy.kcp.io/v1alpha1
+kind: WorkspaceType
+metadata:
+  name: org
+spec:
+  initializers:
+    - root:search
+```
+
+#### Automatic Initialization (Initializer Pattern)
+
+SearchIndex provisioning is performed by a dedicated initializer flow (same pattern as security-operator), not by a generic Workspace watch.
+
+The search operator runs an initializer controller that reconciles `LogicalCluster` resources for newly created org workspaces and creates/updates a corresponding `SearchIndex` in `root:orgs`.
 
 Sequence for a new org workspace `sap`:
 
-1. Platform Mesh creates the `root:orgs:sap` workspace (type `org` or extending `org`)
-2. The search operator observes the new `Workspace` resource in `root:orgs`
-3. The operator reads the workspace's logical cluster ID from the `Workspace.spec.cluster`
-4. The operator creates a `SearchIndex` named `sap` in `root:orgs` with `spec.organizationClusterID` set to the cluster ID
-5. The `SearchIndexReconciler` picks up the new `SearchIndex` and creates the corresponding OpenSearch index
+1. Platform Mesh creates `root:orgs:sap` (type `org` or extending `org`).
+2. KCP marks the workspace as initializing for the configured search initializer.
+3. The search initializer reconciles the workspace `LogicalCluster`.
+4. The initializer reads the workspace logical cluster ID from `Workspace.spec.cluster`.
+5. The initializer creates/updates `SearchIndex` `sap` in `root:orgs` with `spec.organizationClusterID` set to that cluster ID.
+6. `SearchIndexReconciler` creates the OpenSearch index.
+7. The initializer removes its initializer entry from `LogicalCluster.status.initializers`.
 
-When an org workspace is deleted, the operator removes the `SearchIndex` from `root:orgs` (via finalizer), which triggers OpenSearch index deletion.
+When an org workspace is deleted, the `SearchIndex` is deleted via finalizer flow, which triggers OpenSearch index cleanup.
 
-**Operator permissions required in `root:orgs`**:
-- `watch`/`list` on `tenancy.kcp.io/workspaces`
+**Operator permissions required in `root:orgs` and initializer scope**:
+- `get`/`list`/`watch` on `core.kcp.io/logicalclusters`
+- `patch` on `core.kcp.io/logicalclusters/status` (to remove initializer)
+- `get`/`list`/`watch` on `tenancy.kcp.io/workspaces` (for resolving cluster metadata)
 - `create`/`update`/`delete` on `search.platform-mesh.io/searchindices`
 
 ### Search Operator
@@ -209,8 +231,10 @@ The search operator is responsible for:
 **Operator Behavior**:
 
 - Deployed in `root:platform-mesh-system`; uses a dedicated KCP kubeconfig with elevated permissions
+- Runs in two controller modes:
+    - **Initializer mode**: reconciles initializing org `LogicalCluster` resources and provisions `SearchIndex` objects
+    - **Operator mode**: reconciles `SearchIndex` resources and manages resource indexing into OpenSearch
 - Watches `root:orgs` for `SearchIndex` resources (single watch, all orgs)
-- Watches `root:orgs` for `Workspace` resources to auto-provision `SearchIndex` on org creation
 - Uses the KCP virtual workspace endpoint for each org to watch resources across the org's full workspace tree (including sub-orgs at arbitrary depth)
 - Routes indexed documents to the OpenSearch index identified by `spec.organizationClusterID`
 
@@ -356,12 +380,11 @@ The indexed document structure ensures all required hierarchy data (account, nam
    - Apply a single `APIBinding` to `search.platform-mesh.io` in `root:orgs`
    - Repository: `platform-mesh/platform-mesh-operator`
 
-2. **Workspace watch + SearchIndex auto-provisioning**
-   - The search operator watches `Workspace` resources in `root:orgs`
-   - On new org workspace: creates `SearchIndex` in `root:orgs` with `spec.organizationClusterID` from the workspace's cluster ID
-   - On org workspace deletion: removes the `SearchIndex` (via finalizer), triggering OpenSearch index cleanup
-   - File: `charts/search-operator/templates/` (no separate initializer deployment needed)
-   - Repository: `platform-mesh/search-operator`
+2. **Initializer-based SearchIndex auto-provisioning**
+   - Implement a dedicated initializer controller (security-operator pattern) in search-operator
+   - On new org logical cluster: create/update `SearchIndex` in `root:orgs` with `spec.organizationClusterID = Workspace.spec.cluster`
+   - Remove initializer from `LogicalCluster.status.initializers` after successful provisioning
+   - On org deletion: ensure SearchIndex/OpenSearch cleanup via finalizer flow
 
 3. **Operator reconciliation logic for indexing**
    - Implement `SearchIndexReconciler` that, on `SearchIndex` reconcile, establishes a resource watch against the org's virtual workspace endpoint
