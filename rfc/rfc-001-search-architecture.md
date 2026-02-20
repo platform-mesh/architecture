@@ -186,7 +186,7 @@ Sequence for a new org workspace `sap`:
 
 1. Platform Mesh creates the `root:orgs:sap` workspace (type `org` or extending `org`)
 2. The search operator observes the new `Workspace` resource in `root:orgs`
-3. The operator reads the workspace's logical cluster ID from the `Workspace` status
+3. The operator reads the workspace's logical cluster ID from the `Workspace.spec.cluster`
 4. The operator creates a `SearchIndex` named `sap` in `root:orgs` with `spec.organizationClusterID` set to the cluster ID
 5. The `SearchIndexReconciler` picks up the new `SearchIndex` and creates the corresponding OpenSearch index
 
