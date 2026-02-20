@@ -39,18 +39,18 @@ Chosen option: "per-organization-search", because it provides the best balance b
 - Resource isolation per organization (security)
 - Manageable FGA request volume (filtering at organization boundary)
 - Implementation feasibility (proven in hackathon)
-- Scalability (indices can be distributed across OpenSearch clusters)
+- Scalability (indexes can be distributed across OpenSearch clusters)
 
 The per-organization approach aligns with Platform Mesh's existing tenancy model where organizations are the primary isolation boundary.
 
 ### Consequences
 
-* Good, because each organization has isolated search indices preventing information leakage
+* Good, because each organization has isolated search indexes preventing information leakage
 * Good, because OpenFGA authorization is scoped to organization reducing request volume
-* Good, because indices can be distributed across OpenSearch clusters for scalability
+* Good, because indexes can be distributed across OpenSearch clusters for scalability
 * Good, because follows Platform Mesh's existing per-organization tenancy model
-* Bad, because requires managing multiple OpenSearch indices (operational overhead)
-* Bad, because eventual consistency between KCP resources and search indices
+* Bad, because requires managing multiple OpenSearch indexes (operational overhead)
+* Bad, because eventual consistency between KCP resources and search indexes
 * Bad, because additional infrastructure component increases complexity
 
 ### Confirmation
