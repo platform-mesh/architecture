@@ -6,7 +6,7 @@ Date: 2026-02-17
 
 ## Summary
 
-This RFC proposes a generic search engine architecture for Platform Mesh that enables advanced searching capabilities (partial word search, fuzzy search, semantic search) across KCP resources with fine-grained authorization using OpenFGA. The architecture introduces a `SearchIndex` APIResourceSchema and a search operator that integrates with OpenSearch to provide per-organization search indices and handles indexing of a various APIResources.
+This RFC proposes a generic search engine architecture for Platform Mesh that enables advanced searching capabilities (partial word search, fuzzy search, semantic search) across KCP resources with fine-grained authorization using OpenFGA. The architecture introduces a `SearchIndex` APIResourceSchema and a search operator that integrates with OpenSearch to provide per-organization search indexes and handles indexing of various APIResources. One `SearchIndex` resource is created per organization, all residing in the `root:orgs` workspace, which acts as the single management point for org-level search configuration.
 
 ## Context and Problem Statement
 
@@ -26,12 +26,12 @@ Platform Mesh provides a KRM-based API surface through KCP, but lacks built-in s
 1. Deploy their own search infrastructure
 2. Implement custom indexing logic
 3. Manage search authorization separately from KCP/OpenFGA
-4. Maintain synchronization between KCP resources and search indices
+4. Maintain synchronization between KCP resources and search indexes
 
 ## Goals
 
 - Provide a generic, reusable search architecture integrated with Platform Mesh
-- Enable per-organization search indices with proper isolation
+- Enable per-organization search indexes with proper isolation
 - Leverage OpenFGA for fine-grained authorization on search results
 - Support configurable resource tracking (declarative indexing)
 - Expose search through Platform Mesh as a standard API resource
@@ -61,26 +61,41 @@ The search architecture consists of four main components:
 ```mermaid
 graph TB
     subgraph KCP["KCP Workspaces"]
-        OrgSAP["Org Workspace<br/>(root:org:sap)<br/>- Components<br/>- Namespaces<br/>- Accounts"]
-        OrgACME["Org Workspace<br/>(root:org:acme)<br/>- Components<br/>- Namespaces<br/>- Accounts"]
+        subgraph OrgsWS["root:orgs (management workspace)"]
+            SISap["SearchIndex 'sap'<br/>organizationClusterID: abc123"]
+            SIAcme["SearchIndex 'acme'<br/>organizationClusterID: def456"]
+        end
+        subgraph OrgSAP["root:orgs:sap (and sub-orgs)"]
+            SAPRes["Components, Accounts,<br/>Namespaces, …"]
+        end
+        subgraph OrgACME["root:orgs:acme (and sub-orgs)"]
+            ACMERes["Components, Accounts,<br/>Namespaces, …"]
+        end
     end
 
-    SearchOp["Search Operator<br/>- Watches resources<br/>- Transforms to docs<br/>- Manages indices"]
-    OpenSearch["OpenSearch<br/>- Per-org indices<br/>- Full-text search<br/>- Fuzzy matching"]
-    SearchService["Search Service (Future)<br/>- REST API<br/>- FGA filtering<br/>- Contextual tuples"]
+    subgraph PMS["root:platform-mesh-system"]
+        SearchOp["Search Operator<br/>- Watches root:orgs for SearchIndex<br/>- Watches org trees for resources<br/>- Manages OpenSearch indexes"]
+    end
+
+    OpenSearch["OpenSearch<br/>- Index per org (named by cluster ID)<br/>- Full-text search, fuzzy matching"]
+    SearchService["Search Service (Future)<br/>- REST API<br/>- FGA post-search filtering<br/>- Contextual tuples"]
     Clients["UI / API Clients<br/>- Portal<br/>- CLI tools<br/>- Third-party apps"]
     FGA["OpenFGA<br/>- Authorization<br/>- Hierarchy-aware"]
 
-    OrgSAP -->|Resource Events| SearchOp
-    OrgACME -->|Resource Events| SearchOp
+    SISap -->|Reconciled by| SearchOp
+    SIAcme -->|Reconciled by| SearchOp
+    SAPRes -->|Resource Events| SearchOp
+    ACMERes -->|Resource Events| SearchOp
     SearchOp -->|Index/Update/Delete| OpenSearch
-    SearchService -->|Query Results| OpenSearch
-    SearchService -->|Batch Check Calls<br/>with contextual tuples| FGA
+    SearchService -->|Query| OpenSearch
+    OpenSearch -->|Raw Results| SearchService
+    SearchService -->|Batch Check with contextual tuples| FGA
     FGA -->|Authorization Result| SearchService
     Clients -->|Search Request| SearchService
 
     style SearchService fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
     style KCP fill:#e1f5ff,stroke:#333,stroke-width:2px
+    style PMS fill:#fff3e0,stroke:#333,stroke-width:2px
 ```
 
 **Component Interaction Flow**:
@@ -88,7 +103,7 @@ graph TB
 1. **Indexing Phase** (handled by Search Operator):
    - Search Operator watches KCP resources across workspaces
    - Transforms resources into search documents
-   - Indexes them into per-organization OpenSearch indices
+   - Indexes them into per-organization OpenSearch indexes
    - This happens continuously as resources are created/updated/deleted
 
 2. **Search Phase** (handled by Search Service):
@@ -103,65 +118,121 @@ graph TB
 
 ### SearchIndex Resource Schema
 
-The `SearchIndex` resource is exposed through the `core.platform-mesh.io` APIExport and is available in organization workspaces. Eventually there should be a dedicated APIExport that is only used for search (e.g. called `search.platform-mesh.io`) and includes all exports of APIResources that should be searchable.
+All `SearchIndex` resources live in the `root:orgs` workspace — one per organization. This workspace already acts as the management plane for org-level governance resources (WorkspaceTypes, etc.) and is a natural home for search configuration. The search operator, running in `root:platform-mesh-system`, watches `root:orgs` for `SearchIndex` resources and uses the KCP virtual workspace wildcard endpoint to index resources across each org's workspace tree.
 
-**API Group**: `core.platform-mesh.io`
-**Alternative API Group**: `search.platform-mesh.io`
+The `SearchIndex` API is exposed through a dedicated `search.platform-mesh.io` APIExport. A single `APIBinding` to this export is provisioned in `root:orgs` by the platform-mesh-operator as part of infrastructure setup — no per-org `APIBinding` is required.
+
+**API Group**: `search.platform-mesh.io`
 **Kind**: `SearchIndex`
 **Scope**: Cluster
+**Location**: All instances live in `root:orgs`
+
+The `SearchIndex` resource name is the human-readable organization name (e.g., `sap`). The `spec.organizationClusterID` field holds the immutable KCP logical cluster ID of the top-level org workspace. This cluster ID is used as the OpenSearch index name, making the index rename-safe.
+
+```yaml
+apiVersion: search.platform-mesh.io/v1alpha1
+kind: SearchIndex
+metadata:
+  name: sap                    # human-readable org name; lives in root:orgs
+spec:
+  organizationClusterID: abc123  # immutable KCP cluster ID; used as OpenSearch index name
+  trackedResources:              # optional override; defaults to operator's compiled-in list
+    - group: core.platform-mesh.io
+      version: v1alpha1
+      kind: Component
+    - group: core.platform-mesh.io
+      version: v1alpha1
+      kind: Account
+  paused: false
+status:
+  indexName: abc123              # OpenSearch index name (equals organizationClusterID)
+  documentCount: 1482
+  lastSyncTime: "2026-02-17T10:00:00Z"
+  conditions:
+    - type: Ready
+      status: "True"
+```
 
 ### Workspace Integration
 
-#### Workspace Type Extension (POC Phase)
+#### APIBinding in `root:orgs`
 
-The search architecture integrates with the KCP workspace model through a dedicated workspace type:
+Because all `SearchIndex` resources live in `root:orgs`, only a single `APIBinding` is needed — in `root:orgs` itself. This is provisioned once by the platform-mesh-operator as part of infrastructure setup, not per individual org.
 
-**Workspace Type**: `search`
-**Extends**: `org`
-**Location**: `root:platform-mesh-system`
+```yaml
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIBinding
+metadata:
+  name: search.platform-mesh.io
+  # applied in root:orgs
+spec:
+  reference:
+    export:
+      path: root:platform-mesh-system
+      name: search.platform-mesh.io
+  permissionClaims:
+    - group: search.platform-mesh.io
+      resource: searchindexes
+      state: Accepted
+```
+
+The org workspace onboarding path must include the search initializer. This can be done by targeting the org workspace type directly or by using an extension workspace type that carries the initializer.
+
+#### Initializer Registration
+
+Modify workspace type `workspace-type-org.yaml` in the platform mesh operator:
+```diff
+    with:
+    - name: security
+      path: root
++   - name: search
++     path: root
+  defaultAPIBindings:
+    - export: core.platform-mesh.io
+      path: root:platform-mesh-system
+```
 
 ```yaml
 apiVersion: tenancy.kcp.io/v1alpha1
 kind: WorkspaceType
 metadata:
   name: search
+  annotations:
+    kcp.io/cluster: root
+    kcp.io/path: root
 spec:
-  extend:
-    with:
-      - name: org
-  defaultAPIBindings:
-    - exportName: core.platform-mesh.io
-      permissionClaims:
-        - group: core.platform-mesh.io
-          resource: searchindices
-  initializers:
-    - search
+  defaultAPIBindings: []
+  defaultChildWorkspaceType:
+    name: search
+    path: root
+  initializer: true
 ```
 
-The `org` workspace type is updated to extend `search`:
+The search initializer must be attached with it's own workspace type that extends the orgs workspace type. Thus, for every initialization of an org the search initializer will be invoked.
 
-```yaml
-apiVersion: tenancy.kcp.io/v1alpha1
-kind: WorkspaceType
-metadata:
-  name: org
-spec:
-  extend:
-    with:
-      - name: security
-      - name: search  # see reference [pull request](https://github.com/platform-mesh/platform-mesh-operator/pull/335)
-```
+#### Automatic Initialization (Initializer Pattern)
 
-This allows us to have an initializer listen to creations of everything that included in the workspace type.
+SearchIndex provisioning is performed by a dedicated initializer flow (same pattern as security-operator), not by a generic Workspace watch.
 
-#### Automatic Initialization
+The search operator runs an initializer controller that reconciles `LogicalCluster` resources for newly created org workspaces and creates/updates a corresponding `SearchIndex` in `root:orgs`.
 
-When a new organization workspace is created:
+Sequence for a new org workspace `sap`:
 
-1. KCP applies the `search` initializer
-2. The search-operator initializer deployment watches for new workspaces
-3. A default `SearchIndex` resource is created in `root:platform-mesh-system`
-4. The initializer removes itself from the workspace after successful creation
+1. Platform Mesh creates `root:orgs:sap` (type `org` or extending `org`).
+2. KCP marks the workspace as initializing for the configured search initializer.
+3. The search initializer reconciles the workspace `LogicalCluster`.
+4. The initializer reads the workspace logical cluster ID from `Workspace.spec.cluster`.
+5. The initializer creates/updates `SearchIndex` `sap` in `root:orgs` with `spec.organizationClusterID` set to that cluster ID.
+6. `SearchIndexReconciler` creates the OpenSearch index.
+7. The initializer removes its initializer entry from `LogicalCluster.status.initializers`.
+
+When an org workspace is deleted, the `SearchIndex` is deleted via finalizer flow, which triggers OpenSearch index cleanup.
+
+**Operator permissions required in `root:orgs` and initializer scope**:
+- `get`/`list`/`watch` on `core.kcp.io/logicalclusters`
+- `patch` on `core.kcp.io/logicalclusters/status` (to remove initializer)
+- `get`/`list`/`watch` on `tenancy.kcp.io/workspaces` (for resolving cluster metadata)
+- `create`/`update`/`delete` on `search.platform-mesh.io/searchindexes`
 
 ### Search Operator
 
@@ -170,14 +241,16 @@ The search operator is responsible for:
 1. **Resource Indexing**: Index resources from defined APIExports
 2. **Watch Management**: Establish watches on tracked resources
 3. **Document Indexing**: Transform KRM resources to search documents
-4. **Index Lifecycle**: Create, update, delete OpenSearch indices
+4. **Index Lifecycle**: Create, update, delete OpenSearch indexes
 5. **Status Management**: Update SearchIndex status conditions
 
 **Operator Behavior**:
 
-- Watches `root:platform-mesh-system` with elevated permissions
-- Uses KCP kubeconfig for multi-workspace access
-- Maintains one OpenSearch index per organization
+|Name|Purpose|watches|modifies|
+|-|-|-|-|
+|Initializer|reconciles initializing org `LogicalCluster` resources and provisions `SearchIndex` objects|`:root`|`:root:orgs`|
+|SearchIndexController|reconciles `SearchIndex` resources and manages OpenSearch indexes|`:root:orgs` (SearchIndex)|OpenSearch|
+|GenericAPIResourceController|reconciles unstructured resources depending on config|virtual workspaces (APIResources per configuration)|OpenSearch|
 
 **Phase 1 Scope - Static Resource Types**:
 
@@ -207,10 +280,17 @@ For the POC, the structure will be the complete APIResource as JSON format, ensu
 - Single-node cluster for local development
 
 **Index Naming Convention**:
+
+The OpenSearch index name equals the org's KCP logical cluster ID (`spec.organizationClusterID`), for example `abc123`. Cluster IDs are immutable, collision-free, and short — no sanitization needed.
+
+An optional human-readable **alias** (e.g., the org name `sap`) can be maintained alongside for operational tooling. The alias is secondary and never used as the canonical index reference.
+
 ```
-{workspace-path-sanitized}-index
+index name  = {organizationClusterID}    e.g. "abc123"
+index alias = {orgName}                  e.g. "sap"    (optional, for humans)
 ```
-Example: `root-org-sap-account-dev-index`
+
+This design means org renames do not affect the index or require data migration.
 
 **Configuration** (via search-operator):
 ```yaml
@@ -309,18 +389,21 @@ The indexed document structure ensures all required hierarchy data (account, nam
 
 ### POC Next Steps
 
-1. **Workspace type `search` extending `org`**
-   - PR: https://github.com/platform-mesh/platform-mesh-operator/pull/335
+1. **Provision `search.platform-mesh.io` APIExport and APIBinding in `root:orgs`**
+   - Create `APIResourceSchema` + `APIExport` for `search.platform-mesh.io` in `root:platform-mesh-system`
+   - Apply a single `APIBinding` to `search.platform-mesh.io` in `root:orgs`
    - Repository: `platform-mesh/platform-mesh-operator`
 
-2. **Initializer for auto-creating SearchIndex resources**
-   - Creates SearchIndex resource in `root:platform-mesh-system`
-   - Deletes initializer string after completion
-   - File: `charts/search-operator/templates/initializer-deployment.yaml`
+2. **Initializer-based SearchIndex auto-provisioning**
+   - Implement a dedicated initializer controller (security-operator pattern) in search-operator
+   - On new org logical cluster: create/update `SearchIndex` in `root:orgs` with `spec.organizationClusterID = Workspace.spec.cluster`
+   - Remove initializer from `LogicalCluster.status.initializers` after successful provisioning
+   - On org deletion: ensure SearchIndex/OpenSearch cleanup via finalizer flow
 
 3. **Operator reconciliation logic for indexing**
-   - Implement unstructured operator configurable via YAML or `config.go`
-   - Discover resources via reading APIExport (core.platform-mesh.io)
+   - Implement `SearchIndexReconciler` that, on `SearchIndex` reconcile, establishes a resource watch against the org's virtual workspace endpoint
+   - Index documents into OpenSearch using `spec.organizationClusterID` as the index name
+   - Configurable tracked resource types (default list compiled into operator; `spec.trackedResources` as override)
    - Repository: `platform-mesh/search-operator`
 
 ### Platform Mesh Integration
@@ -332,41 +415,31 @@ The indexed document structure ensures all required hierarchy data (account, nam
 
 ## Validation Steps
 
-Validation commands for verifying search setup:
-
 **In `:root:platform-mesh-system`:**
 
 ```bash
 # Verify APIResourceSchema exists
 kubectl get apiresourceschemas
 
+# Look up the virtualiorkspace url from the apiexportendpointslice for exact URL
+export APIExportEndpointSliceURL = https://kcp.api.portal.dev.local:8443/services/apiexport/<UUID>/core.platform-mesh.io/clusters/*/
+
 # Verify APIBindings across all orgs
 kubectl get apibindings \
-  --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' \
+  --server='$APIExportEndpointSliceURL' \
   -A
 
 # Verify SearchIndex resources can be queried
 kubectl get searchindices \
-  --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/' \
+  --server='$APIExportEndpointSliceURL' \
   -A
 
 # Verify API resources are registered
 kubectl api-resources \
-  --server='https://kcp.api.portal.dev.local:8443/services/apiexport/1cklpfb2n05i2klh/core.platform-mesh.io/clusters/*/'
+  --server='$APIExportEndpointSliceURL'
 ```
 
-**In `:root`:**
-
-```bash
-# Verify workspace types include search
-kubectl get workspacetypes
-
-# Verify search workspace type spec
-kubectl get workspacetypes search -o yaml
-
-# Verify org extends security and search
-kubectl get workspacetypes org -o yaml
-```
+**Verify indexing is working:**
 
 ### Future Considerations
 
