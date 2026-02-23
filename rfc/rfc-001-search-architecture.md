@@ -118,9 +118,9 @@ graph TB
 
 ### SearchIndex Resource Schema
 
-All `SearchIndex` resources live in the `root:orgs` workspace — one per organization. This workspace already acts as the management plane for org-level governance resources (WorkspaceTypes, etc.) and is a natural home for search configuration. The search operator, running in `root:platform-mesh-system`, watches `root:orgs` for `SearchIndex` resources and uses the KCP virtual workspace wildcard endpoint to index resources across each org's workspace tree.
+All `SearchIndex` resources live in the `root:orgs` workspace (one per organization). This workspace already acts as the management plane for org-level governance resources (WorkspaceTypes, etc.) and is a natural home for search configuration. The search operator, running in `root:platform-mesh-system`, watches `root:orgs` for `SearchIndex` resources and uses the KCP virtual workspace wildcard endpoint to index resources across each org's workspace tree.
 
-The `SearchIndex` API is exposed through a dedicated `search.platform-mesh.io` APIExport. A single `APIBinding` to this export is provisioned in `root:orgs` by the platform-mesh-operator as part of infrastructure setup — no per-org `APIBinding` is required.
+The `SearchIndex` API is exposed through a dedicated `search.platform-mesh.io` APIExport. A single `APIBinding` to this export is provisioned in `root:orgs` by the platform-mesh-operator as part of infrastructure setup. This means that no org-specific `APIBinding` is required.
 
 **API Group**: `search.platform-mesh.io`
 **Kind**: `SearchIndex`
@@ -157,7 +157,7 @@ status:
 
 #### APIBinding in `root:orgs`
 
-Because all `SearchIndex` resources live in `root:orgs`, only a single `APIBinding` is needed — in `root:orgs` itself. This is provisioned once by the platform-mesh-operator as part of infrastructure setup, not per individual org.
+Because all `SearchIndex` resources live in `root:orgs`, only a single `APIBinding` is needed in `root:orgs` itself. This is provisioned once by the platform-mesh-operator as part of infrastructure setup, not per individual org.
 
 ```yaml
 apiVersion: apis.kcp.io/v1alpha2
@@ -281,7 +281,7 @@ For the POC, the structure will be the complete APIResource as JSON format, ensu
 
 **Index Naming Convention**:
 
-The OpenSearch index name equals the org's KCP logical cluster ID (`spec.organizationClusterID`), for example `abc123`. Cluster IDs are immutable, collision-free, and short — no sanitization needed.
+The OpenSearch index name equals the org's KCP logical cluster ID (`spec.organizationClusterID`), for example `abc123`. Cluster IDs are immutable and collision-free.
 
 An optional human-readable **alias** (e.g., the org name `sap`) can be maintained alongside for operational tooling. The alias is secondary and never used as the canonical index reference.
 
