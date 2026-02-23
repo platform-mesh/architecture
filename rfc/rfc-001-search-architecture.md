@@ -136,14 +136,9 @@ metadata:
   name: sap                    # human-readable org name; lives in root:orgs
 spec:
   organizationClusterID: abc123  # immutable KCP cluster ID; used as OpenSearch index name
-  trackedResources:              # optional override; defaults to operator's compiled-in list
-    - group: core.platform-mesh.io
-      version: v1alpha1
-      kind: Component
-    - group: core.platform-mesh.io
-      version: v1alpha1
-      kind: Account
-  paused: false
+  indexPrefix: "pm-orgs"
+  numberOfReplicas: 1
+  numberOfShards: 1
 status:
   indexName: abc123              # OpenSearch index name (equals organizationClusterID)
   documentCount: 1482
