@@ -19,7 +19,7 @@ Terminal Controller Manager is a Kubernetes controller that provides browser-bas
 
 ## Context and Problem Statement
 
-Platform-mesh is built on [KCP](https://github.com/kcp-dev/kcp) (Kubernetes Control Plane). Users manage their resources through two fully supported clients: the portal UI and kubectl. Both are first-class interfaces to the platform, and making the CLI approachable to all users is a strategic goal.
+Platform-mesh is built on [KCP](https://github.com/kcp-dev/kcp) (Kubernetes-like control-plane). Users manage their resources through two fully supported clients: the portal UI and kubectl. Both are first-class interfaces to the platform, and making the CLI approachable to all users is a strategic goal.
 
 Today, using kubectl against a KCP workspace requires local setup: installing kubectl, KCP plugins (`kubectl-kcp`, `kubectl-ws`), and downloading the OIDC kubeconfig. The barrier of entry is high, especially for users who primarily work through the portal and only occasionally need CLI access.
 
