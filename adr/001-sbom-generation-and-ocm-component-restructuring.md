@@ -28,7 +28,6 @@ Adding SBOMs raises a structural question: **where should image SBOMs live in th
 
 1. **Add SBOMs to the existing chart-pipeline OCM component** — keep the current single-component model, add SBOM resources alongside chart + image.
 2. **Create separate image OCM components in source-repo pipelines** — each image gets its own OCM component containing the image reference and SBOMs; the software component references image components via `componentReferences`.
-3. **Generate SBOMs in the chart pipeline and store them externally** — generate SBOMs in the chart pipeline but push them to the OCI registry as standalone artifacts rather than embedding in OCM.
 
 ## Decision Outcome
 
@@ -68,15 +67,6 @@ Each source repo that produces a Docker image also creates an OCM component cont
 * Bad, because it requires changes to both app pipelines (new SBOM + OCM jobs) and chart pipelines (switch to component references).
 * Bad, because migration must be coordinated across repos.
 
-### Option 3: Generate SBOMs in chart pipeline, store externally
-
-Generate SBOMs during the chart pipeline (similar to Option 1) but push them as standalone OCI artifacts to the registry rather than embedding them in the OCM component.
-
-* Good, because SBOMs are accessible via standard OCI tooling.
-* Good, because no changes to the OCM component model are needed.
-* Bad, because SBOMs are disconnected from the OCM component model — there is no standard way to discover which SBOMs belong to which component.
-* Bad, because the chart pipeline still needs to scan images it did not build.
-* Bad, because it introduces a parallel distribution mechanism outside OCM, reducing the value of using OCM as the single source of truth.
 
 ## More Information
 
