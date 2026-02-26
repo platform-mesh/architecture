@@ -45,13 +45,6 @@ Chosen option: **"Create separate image OCM components in source-repo pipelines"
 * Bad, because existing `component-constructor.yaml` files in all chart repos need to be migrated from inline image resources to `componentReferences`.
 * Bad, because the prerelease aggregator (`platform-mesh/ocm`) may need updates to resolve the new component-reference tree.
 
-### Confirmation
-
-* `ocm get resources <image-component>` returns SBOM resources with `type: sbom` and correct media types (`application/vnd.cyclonedx+json`, `application/spdx+json`).
-* `ocm get references <software-component>` shows image component references.
-* The prerelease aggregator (`ocm.yaml`) successfully resolves the full component tree including image sub-components.
-* All existing CI pipelines remain green after migration.
-
 ## Pros and Cons of the Options
 
 ### Option 1: Add SBOMs to the existing chart-pipeline OCM component
