@@ -192,7 +192,7 @@ Each terminal pod runs ttyd directly and is exposed via Gateway API HTTPRoute, r
 
 ### Cluster-scoped over namespace-scoped Terminal CRs
 
-Terminal is a cluster-scoped resource because KCP workspaces do not have meaningful namespaces for this purpose. Cluster-scoped aligns with KCP's model where workspace identity is the primary isolation boundary.
+Terminal is a cluster-scoped resource since namespacing does not add context or isolation in the consumer or provider.
 
 ### ttyd over kubectl exec
 
