@@ -7,7 +7,7 @@
 
 ## Summary
 
-Terminal Controller Manager is a Kubernetes controller that provides browser-based terminal sessions to KCP workspaces. It watches cluster-scoped `Terminal` CRs across KCP workspaces via multicluster-runtime and creates ephemeral pods running [ttyd](https://tsl0922.github.io/ttyd/) with kubectl and KCP plugins on a runtime cluster. User OIDC tokens are never stored in Kubernetes -- they are passed at connection time through the ttyd WebSocket and validated against the user specified in the Terminal spec.
+Terminal Controller Manager is a Kubernetes controller that provides browser-based terminal sessions to kcp workspaces. It watches cluster-scoped `Terminal` CRs across kcp workspaces via multicluster-runtime and creates ephemeral pods running [ttyd](https://tsl0922.github.io/ttyd/) with kubectl and kcp plugins on a runtime cluster. User OIDC tokens are never stored in Kubernetes -- they are passed at connection time through the ttyd WebSocket and validated against the user specified in the Terminal spec.
 
 ## Motivation
 
