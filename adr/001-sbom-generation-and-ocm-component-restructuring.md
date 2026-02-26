@@ -64,7 +64,7 @@ Each source repo that produces a Docker image also creates an OCM component cont
 * Good, because image + SBOMs are produced together at build time with complete build context.
 * Good, because components with multiple images (e.g. `terminal-controller-manager`) are modeled naturally — one `componentReference` per image.
 * Good, because image components are independently versioned and consumable.
-* Neutral, because it introduces more OCM components, but each is small and self-contained.
+* Bad, because it introduces more OCM components, though each is small and self-contained.
 * Bad, because it requires changes to both app pipelines (new SBOM + OCM jobs) and chart pipelines (switch to component references).
 * Bad, because migration must be coordinated across repos.
 
