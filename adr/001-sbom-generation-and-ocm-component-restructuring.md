@@ -42,16 +42,16 @@ Chosen option: **"Create separate image OCM components in source-repo pipelines"
 * Good, because image OCM components can be consumed independently of charts (e.g. for vulnerability scanning).
 * Good, because components with multiple images (e.g. `terminal-controller-manager` with operator + terminal images) are modeled cleanly — one component reference per image.
 * Bad, because the total number of OCM components in the registry increases (one additional per image-producing repo).
-* Bad, because existing `component-constructor.yaml` files in all chart repos need to be migrated from inline image resources to `componentReferences`.
+* Bad, because existing [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) files in all chart repos need to be migrated from inline image resources to `componentReferences`.
 * Bad, because the prerelease aggregator (`platform-mesh/ocm`) may need updates to resolve the new component-reference tree.
 
 ## Pros and Cons of the Options
 
 ### Option 1: Add SBOMs to the existing chart-pipeline OCM component
 
-Keep the current model where `job-ocm.yml` creates a single OCM component with chart + image + sources, and add SBOM resources to this same component.
+Keep the current model where [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) creates a single OCM component with chart + image + sources, and add SBOM resources to this same component.
 
-* Good, because it requires minimal pipeline changes — only `job-ocm.yml` and `component-constructor.yaml` need updates.
+* Good, because it requires minimal pipeline changes — only [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) and [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) need updates.
 * Good, because the total number of OCM components stays the same.
 * Bad, because SBOMs are disconnected from the image build — a rebuild of the image without a chart release leaves stale SBOMs.
 * Bad, because the chart pipeline must scan images it did not build, meaning SBOM accuracy depends on scanning a remote artifact rather than the local build context.
@@ -228,6 +228,6 @@ The same pattern should be applied to third-party images that are rebuilt from t
 1. Implement `job-sbom.yml` and `job-image-ocm.yml` as new reusable workflows.
 2. Update [`pipeline-golang-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-golang-app.yml) and [`pipeline-node-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-node-app.yml): add `job-sbom` + `job-image-ocm` before the existing `job-chart-version-update` step. The image OCM component is published before triggering the chart version update.
 3. Update [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) to support `componentReferences` (backward-compatible — existing constructors keep working).
-4. Migrate chart repos one-by-one: switch `component-constructor.yaml` from inline image resources to component references. `appVersion` continues to be updated by `job-chart-version-update` as today.
+4. Migrate chart repos one-by-one: switch [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) from inline image resources to component references. `appVersion` continues to be updated by `job-chart-version-update` as today.
 5. Apply the same SBOM + image-component pattern to upstream/third-party image builds.
 6. Update the OCM aggregator (`platform-mesh/ocm`) to resolve the new component-reference tree.
