@@ -6,7 +6,7 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.**. APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportBinding` resource for that APIExport
+1. **APIExports are not bindable by default.** APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportBinding` resource for that APIExport
 2. Platform-mesh administrator configure `APIExportBinding` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
 3. The security-operator reconciles `APIExportBinding` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
@@ -18,7 +18,7 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 | API Provider | Creates APIExport resource, have no control over bindability of his API. |
 | Platform-mesh Operator/Administator | Defines `APIExportBinding` resources controling which API's can be used in the organizations. |
 | Security Operator | Reconcile `APIExportBinding` resources in platform-mesh-system and creates needed tuples |
-| Organization Admin | Can further restrict binding within their own org by creating `APIExportBinding` resource (future). |
+| Organization Admin | Can further restrict binding permissions within their own org (future). |
 
 ## FGA Authorization Model Changes
 
@@ -35,9 +35,9 @@ type core_platform-mesh_io_account
 ```
 
 This schema update will make us able to allow apiExport binding for:
-1. one specific workspace(account) only, for this security-operator will create a tuple with bind relation
-2. workspace(account) and all child workspaces(accounts), for this security-operator will create a tuple with bind_inherited relation in organization store
-To allow binding in every user's workspace, security operator will create a tuple with bind_inherited relation in every store
+1. one specific workspace(account) only, for this security-operator will create a tuple with `bind` relation
+2. workspace(account) and all child workspaces(accounts), for this security-operator will create a tuple with `bind_inherited` relation in organization store
+3. to allow binding in every user's workspace, security operator will create a tuple with `bind_inherited` relation in every store
 
 - root
     - orgs
@@ -50,9 +50,9 @@ To allow binding in every user's workspace, security operator will create a tupl
     - platform-mesh-system
 
 E.g in this kcp structure:
-1. to grant binding permissions only for account C, the system would need to have APIExportBinding resource with - root:orgs:org1:accountA:accountB:accountC path expression
-2. to grant binding persmissions for every account in org1, the system would need to have APIExportBinding resource with - root:orgs:org1:* path expression
-3. to grant binding persmissions for every account in the system, the system would need to have APIExportBinding resource with - root:orgs:* path expression
+1. to grant binding permissions only for account C, the system would need to have `APIExportBinding` resource with - `root:orgs:org1:accountA:accountB:accountC` path expression
+2. to grant binding persmissions for every account in org1, the system would need to have `APIExportBinding` resource with - `root:orgs:org1:*` path expression
+3. to grant binding persmissions for every account in the system, the system would need to have `APIExportBinding` resource with - `root:orgs:*` path expression
 
 ## Binding CRD Schema
 
