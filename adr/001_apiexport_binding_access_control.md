@@ -16,8 +16,8 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 | Role | Responsibility |
 |---|---|
 | API Provider | Creates APIExport resource, have no control over bindability of his API. |
-| Platform-mesh Operator | Defines `APIExportBinding` resources controling which API's can be used in the organizations. |
-| Security Operator | Reconcile `APIExportBinding` resources in platform-mesh-system |
+| Platform-mesh Operator/Administator | Defines `APIExportBinding` resources controling which API's can be used in the organizations. |
+| Security Operator | Reconcile `APIExportBinding` resources in platform-mesh-system and creates needed tuples |
 | Organization Admin | Can further restrict binding within their own org by creating `APIExportBinding` resource (future). |
 
 ## FGA Authorization Model Changes
@@ -30,12 +30,29 @@ type apis_kcp_io_apiexport
 type core_platform-mesh_io_account
   relations
     define parent: [core_platform-mesh_io_account]
-    define bind: [apis_kcp_io_apiexport] or bind from parent
+    define bind_inherited: [apis_kcp_io_apiexport] or bind_inherited from parent
+    define bind: [apis_kcp_io_apiexport] or bind_inherited
 ```
 
-This schema update will make us able to allow apiExport binding for some specific account and all it's child accounts. The organization is also an account, so to allow binding for every account in some organization, a platform-mesh administrator need to set organization's account name.
+This schema update will make us able to allow apiExport binding for:
+1. one specific workspace(account) only, for this security-operator will create a tuple with bind relation
+2. workspace(account) and all child workspaces(accounts), for this security-operator will create a tuple with bind_inherited relation in organization store
+To allow binding in every user's workspace, security operator will create a tuple with bind_inherited relation in every store
 
-TODO: add kcp schema example and more explanation based on it
+- root
+    - orgs
+        - org1
+            - accountA
+                - accountB
+                    - accountC
+        - org2
+            - accountD
+    - platform-mesh-system
+
+E.g in this kcp structure:
+1. to grant binding permissions only for account C, the system would need to have APIExportBinding resource with - root:orgs:org1:accountA:accountB:accountC path expression
+2. to grant binding persmissions for every account in org1, the system would need to have APIExportBinding resource with - root:orgs:org1:* path expression
+3. to grant binding persmissions for every account in the system, the system would need to have APIExportBinding resource with - root:orgs:* path expression
 
 ## Binding CRD Schema
 
@@ -64,7 +81,7 @@ status:
   conditions:
     - type: Ready
       status: "True"
-  # to efectivelly remove/add tuples if expressions have changed
+  # to efectivelly remove tuples if expressions have changed
   managedExpressions:
     - root:orgs:default:abc
     - root:orgs:default:cde 
@@ -76,7 +93,7 @@ The `APIExportBinding` CR is created by platform-mesh administrator. The securit
 
 ## Scenarios
 
-### Scenario 1: Specific paths can bind an APIExport
+### Scenario 1: Only one specific account can bind an APIExport
 
 **Configuration:**
 
@@ -86,22 +103,16 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
   pathExpressions:
-    - root:orgs:default:*
-    - root:orgs:demo:*
+    - root:orgs:org1:accountA:accountB:accountC
 ```
 
-The security-operator resolves each path expression to the corresponding workspace(s), then writes one bind tuple per resolved workspace into that workspace’s FGA store (object = root account for that path so `bind from parent` gives all accounts under that path access).
+The security-operator resolves the path expression to the referenced account and writes a single tuple using relation `bind`. This grants bind permission only to that specific account. Child accounts do **not** inherit it because inheritance is only implemented via `bind_inherited from parent`.
 
-**Stored tuples** (one per resolved workspace):
+**Stored tuple**:
 
 ```
-# In store for root:orgs:default
-object:   core_platform-mesh_io_account:<default-cluster-id>/default
-relation: bind
-user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
-
-# In store for root:orgs:demo
-object:   core_platform-mesh_io_account:<demo-cluster-id>/demo
+# For accountC only:
+object:   core_platform-mesh_io_account:<accountC-cluster-id>/accountC
 relation: bind
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ```
@@ -115,9 +126,39 @@ Relation: bind
 User:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ```
 
-FGA evaluation: `bind from parent` traverses up to the root account for that workspace → root has the tuple → **allowed**. Any path not in `pathExpressions` has no tuple → **denied**.
+FGA evaluation:
+- For `accountC`: direct `bind` tuple match → **allowed**
+- For any child of `accountC`: no direct `bind` tuple; `bind_inherited` is not set anywhere in the chain → **denied**
 
-### Scenario 2: All orgs can bind an APIExport
+### Scenario 2: All accounts in one organization can bind an APIExport
+
+**Configuration:**
+
+```yaml
+spec:
+  apiExportRef:
+    name: orchestrate.platform-mesh.io
+    clusterName: provider-cluster-1
+  pathExpressions:
+    - root:orgs:org1:*
+```
+
+The security-operator resolves `root:orgs:org1:*` to the organization root account (org1) and writes a single tuple using relation `bind_inherited`. This allows all descendant accounts to bind via `bind_inherited from parent`.
+
+**Stored tuple** (written into org1's FGA store):
+
+```
+# In org1 store:
+object:   core_platform-mesh_io_account:<org1-cluster-id>/org1
+relation: bind_inherited
+user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
+```
+
+**Authz check** from any account under org1: same as above; `bind_inherited from parent` reaches org1 which has the tuple → **allowed**.
+
+Tuple cost: 1 tuple in org1's store for this APIExport.
+
+### Scenario 3: All accounts in all organizations can bind an APIExport
 
 **Configuration:**
 
@@ -130,20 +171,25 @@ spec:
     - root:orgs:*
 ```
 
-The security-operator resolves `root:orgs:*` to all workspaces under `root:orgs` and writes one bind tuple per workspace store.
+The security-operator resolves `root:orgs:*` to all org root accounts and writes one `bind_inherited` tuple per org store.
 
-**Stored tuples** (1 tuple per known workspace under root:orgs):
+**Stored tuples** (1 tuple per org store):
 
 ```
-# In each store:
-object:   core_platform-mesh_io_account:<org-workspace-cluster-id>/<org-workspace-name>
-relation: bind
+# In org-1 store:
+object:   core_platform-mesh_io_account:<org1-cluster-id>/org1
+relation: bind_inherited
 user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
+
+# In org-2 store:
+object:   core_platform-mesh_io_account:<org2-cluster-id>/org2
+relation: bind_inherited
+user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
+
+# ... one per org
 ```
 
-**Authz check** from any account in any matching workspace: same as above; `bind from parent` reaches the root account that has the tuple → **allowed**.
-
-Tuple cost: 1 tuple per resolved workspace store. For `root:orgs:*`, that is one per org workspace.
+**Authz check** from any account in any org: same as above; `bind_inherited from parent` reaches the org root that has the tuple → **allowed**.
 
 ## Component Responsibilities
 
@@ -177,15 +223,15 @@ Check(
 )
 ```
 
-
 ## Tuple Summary
 
 | Scenario | Tuples per APIExport | Where |
 |---|---|---|
 | No Binding / not bindable | 0 | nowhere |
-| All orgs (`pathExpressions`: e.g. `root:orgs:*`) | 1 per resolved workspace | each org’s FGA store |
-| Subtree (`pathExpressions`: e.g. `root:orgs:demo:*`) | 1 per resolved workspace under path | each matching FGA store |
+| One account only (`pathExpressions`: concrete account path) | 1 | consumer org store containing that account |
+| One org subtree (`pathExpressions`: `root:orgs:<org>:*`) | 1 | that org’s FGA store |
+| All orgs (`pathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
 
 ## Open Considerations
-- **Workspace-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
-- **How to support binding permission for only one specigic account without child accounts**
+- **Mechanism to validate ApiExport**: without an ability to automate `APIExportBinding` creation for ApiExports, it would be impossible to become provider without Platform Mesh administrator intervention 
+- **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
