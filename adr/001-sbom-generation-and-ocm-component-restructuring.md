@@ -6,7 +6,7 @@
 
 ## Context and Problem Statement
 
-Platform Mesh uses the [Open Component Model (OCM)](https://ocm.software) to package and distribute software components. Today, the chart pipeline (`pipeline-chart.yml`) creates a single OCM component per software component that bundles the Helm chart, the OCI image reference, and source metadata together (see the `component-constructor.yaml` template used by `job-ocm.yml`).
+Platform Mesh uses the [Open Component Model (OCM)](https://ocm.software) to package and distribute software components. Today, the chart pipeline ([`pipeline-chart.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-chart.yml)) creates a single OCM component per software component that bundles the Helm chart, the OCI image reference, and source metadata together (see the [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) template used by [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml)).
 
 No Software Bill of Materials (SBOM) is currently generated for any container image in the platform. Supply-chain security requirements increasingly demand SBOMs in standard formats (CycloneDX, SPDX) for every shipped artifact.
 
