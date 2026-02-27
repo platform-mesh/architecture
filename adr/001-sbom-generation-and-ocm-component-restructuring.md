@@ -2,7 +2,7 @@
 
 | Status  | Proposed   |
 |---------|------------|
-| Date    | 2026-02-19 |
+| Date    | 2026-02-27 |
 
 ## Context and Problem Statement
 
@@ -23,26 +23,31 @@ Adding SBOMs raises a structural question: **where should image SBOMs live in th
 * **Clean ownership**: An image's SBOM should be produced and packaged alongside the image at build time, not in a downstream chart pipeline.
 * **Reusability**: SBOM generation must work for any image pipeline ([`pipeline-golang-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-golang-app.yml), [`pipeline-node-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-node-app.yml), custom image builds).
 * **OCM spec compliance**: SBOMs should use the standard `sbom` resource type with appropriate media types.
+* **Standalone Helm compatibility**: Charts should remain usable without OCM by maintaining `appVersion` updates.
 
 ## Considered Options
 
 1. **Add SBOMs to the existing chart-pipeline OCM component** — keep the current single-component model, add SBOM resources alongside chart + image.
 2. **Create separate image OCM components in source-repo pipelines** — each image gets its own OCM component containing the image reference and SBOMs; the software component references image components via `componentReferences`.
+3. **Separate chart and image OCM components under a root component** — both chart and image get their own OCM component; a root component references both via `componentReferences`, keeping all artifacts independently versioned and reusable.
 
 ## Decision Outcome
 
-Chosen option: **"Create separate image OCM components in source-repo pipelines"**, because it co-locates each image with its SBOMs at build time, establishes OCM as the authority for image version resolution in the standard deployment while preserving the chart-version-update flow for standalone Helm compatibility, and aligns with OCM's component-reference model for composing larger deliverables from smaller, independently versioned components.
+Chosen option: **"Separate chart and image OCM components under a root component"**, because it cleanly separates all artifact types into independently versioned components, follows established OCM conventions for composing deliverables, provides a natural extension point for future cross-cutting metadata (deployment config, signing artifacts), and explicitly establishes version dependencies between chart and image — addressing the need for traceable multi-version support.
 
 ### Consequences
 
 * Good, because every container image gets CycloneDX and SPDX SBOMs generated at build time with full provenance.
-* Good, because OCM becomes the authority for image version resolution in the standard deployment — image versions are determined by component references, not `appVersion`. The `appVersion` field is still updated for standalone Helm compatibility.
+* Good, because OCM becomes the authority for image version resolution in the standard deployment — image versions are determined by the root component's references to chart and image components, not `appVersion`.
 * Good, because SBOM generation is reusable across all app pipeline types via shared workflows.
-* Good, because image OCM components can be consumed independently of charts (e.g. for vulnerability scanning).
+* Good, because image and chart components are independently versioned and consumable — image components can be consumed for vulnerability scanning without pulling charts, and chart components can be consumed without pulling images.
+* Good, because the root component explicitly establishes the dependency between a specific chart version and a specific image version, enabling traceable multi-version support (e.g. `v1.*.*` and `v2.*.*` in parallel).
+* Good, because the root component provides a clean extension point for deployment metadata, signing artifacts, or other cross-cutting resources without polluting chart or image components.
 * Good, because components with multiple images (e.g. `terminal-controller-manager` with operator + terminal images) are modeled cleanly — one component reference per image.
-* Bad, because the total number of OCM components in the registry increases (one additional per image-producing repo).
-* Bad, because existing [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) files in all chart repos need to be migrated from inline image resources to `componentReferences`.
-* Bad, because the prerelease aggregator (`platform-mesh/ocm`) may need updates to resolve the new component-reference tree.
+* Good, because `appVersion` continues to be updated, preserving standalone Helm compatibility for users deploying without OCM.
+* Bad, because the total number of OCM components in the registry increases (root + chart + image per software component).
+* Bad, because existing [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) files in chart repos need to be migrated to produce chart-only components instead of the current monolithic component.
+* Bad, because the `ocm` repo needs a new pipeline (`pipeline-root-component.yml`) to assemble root components, and the aggregator may need updates to resolve the new component-reference tree.
 
 ## Pros and Cons of the Options
 
@@ -66,27 +71,42 @@ Each source repo that produces a Docker image also creates an OCM component cont
 * Bad, because it introduces more OCM components, though each is small and self-contained.
 * Bad, because it requires changes to both app pipelines (new SBOM + OCM jobs) and chart pipelines (switch to component references).
 * Bad, because migration must be coordinated across repos.
+* Bad, because the software component embeds the chart as a resource while referencing images as components — this asymmetry means the chart cannot be consumed independently and the software component mixes resource types with component references.
+
+### Option 3: Separate chart and image OCM components under a root component
+
+Each image gets its own OCM component with SBOMs (same as Option 2). The chart is also extracted into its own OCM component. A **root component** references both chart and image components via `componentReferences`, establishing explicit version dependencies between all artifacts. The root component version follows the chart version (the leading version), while the image component is versioned independently.
+
+```
+root-component (github.com/platform-mesh/security-operator)
+  ├── componentRef: chart (github.com/platform-mesh/helm-charts/security-operator)
+  │     └── resource: chart
+  └── componentRef: image (github.com/platform-mesh/images/security-operator)
+        ├── resource: image
+        ├── resource: sbom-cyclonedx
+        └── resource: sbom-spdx
+```
+
+* Good, because image + SBOMs are produced together at build time with complete build context.
+* Good, because both chart and image are independently versioned and reusable — neither is embedded as a resource in the other's component.
+* Good, because the root component provides a clean place for deployment metadata, signing artifacts, or other cross-cutting resources without polluting chart or image components.
+* Good, because components with multiple images are modeled naturally — additional image component references are added to the root.
+* Good, because it follows established OCM conventions for composing deliverables from independent building blocks.
+* Good, because the root component explicitly establishes the relationship between chart and image versions, enabling traceable multi-version support.
+* Good, because each pipeline has a single responsibility — source-repo pipelines produce image components, chart pipelines produce chart components, and the `ocm` repo assembles root components.
+* Bad, because it introduces the most OCM components (root + chart + image per software component).
+* Bad, because migration is the most involved — existing chart-pipeline OCM components must be converted to chart-only components, a new root-component pipeline must be created in the `ocm` repo, and all image resources must be extracted to image components.
 
 
 ## More Information
 
 ### Proposed Architecture
 
-**Current flow:**
-
 ```
-Source repo: build → test → docker push ──────────────────────→ trigger chart version update
-Chart repo:  test chart → release chart → OCM(chart+image+sources) → transfer → trigger aggregator
+Source repo: build → test → docker push → syft SBOM → OCM(image+SBOMs) → trigger chart version update
+Chart repo:  test chart → release chart → OCM(chart component) → trigger ocm repo
+OCM repo:    assemble root component (refs to chart+image) → transfer → trigger aggregator
 ```
-
-**Proposed flow:**
-
-```
-Source repo: build → test → docker push → syft SBOM → OCM(image+SBOMs) → trigger chart version update (as today)
-Chart repo:  test chart → release chart → OCM(chart + componentRef:image + sources) → transfer → trigger aggregator
-```
-
-The key difference from today: source-repo pipelines now additionally generate SBOMs and publish an image OCM component **before** triggering [`job-chart-version-update.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-chart-version-update.yml). The chart-version-update flow remains unchanged — image builds still bump `appVersion` and `chartVersion` in the helm-charts repo for standalone Helm compatibility. The chart pipeline's OCM step is updated to use `componentReferences` to the image OCM component instead of embedding the image resource directly. The chart pipeline uses `appVersion` to pin the `componentReference` to the matching image OCM component version, ensuring the software component always references the correct image component version.
 
 ### New Reusable Workflows (`.github` repo)
 
@@ -94,6 +114,7 @@ The key difference from today: source-repo pipelines now additionally generate S
 |----------|---------|
 | `job-sbom.yml` | Generates CycloneDX JSON and SPDX JSON SBOMs for a given image using [syft](https://github.com/anchore/syft) |
 | `job-image-ocm.yml` | Creates an OCM component for an image and its SBOMs, then transfers to the OCM registry |
+| `job-chart-ocm.yml` | Creates an OCM component for a Helm chart, then transfers to the OCM registry |
 
 ### Modified Reusable Workflows
 
@@ -101,25 +122,32 @@ The key difference from today: source-repo pipelines now additionally generate S
 |----------|--------|
 | [`pipeline-golang-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-golang-app.yml) | Add `job-sbom` + `job-image-ocm` before the existing `job-chart-version-update` step. The image OCM component is published first, then chart version update is triggered as today. |
 | [`pipeline-node-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-node-app.yml) | Same as above |
-| [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) | Support `componentReferences` for images instead of direct `image` resources |
-| [`pipeline-chart.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-chart.yml) | Still triggered by chart version updates from image builds. OCM step updated to use `componentReferences`. |
+| [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) | Produce only a chart component instead of the current monolithic component. After publishing, trigger the `ocm` repo pipeline to assemble the root component. |
+| [`pipeline-chart.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-chart.yml) | Still triggered by chart version updates from image builds. OCM step updated to produce chart component only and trigger `ocm` repo. |
+
+### New Pipeline (`ocm` repo)
+
+| Workflow | Purpose |
+|----------|---------|
+| `pipeline-root-component.yml` | Triggered by chart pipelines. Assembles the root OCM component with `componentReferences` to the chart and image components, then transfers to the OCM registry and triggers the aggregator. Receives component name, chart version, and `appVersion` as inputs. |
 
 ### Naming Convention
 
-Image OCM components use a `-image` suffix to avoid collision with software component names. Software components keep their current names — no migration of existing names is needed.
+Component names avoid technical artifact suffixes (e.g. `-image`, `-chart`) and instead use path-based namespacing to group components by type. This follows the OCM convention that component names should be free from technical artifact names, allowing storage and access technologies to change without renaming components.
 
 | Component Type | Name Pattern | Example |
 |----------------|-------------|---------|
-| Software (existing) | `github.com/platform-mesh/<component-name>` | `github.com/platform-mesh/security-operator` |
-| Image (new) | `github.com/platform-mesh/<repo-name>-image` | `github.com/platform-mesh/security-operator-image` |
+| Root (existing name, unchanged) | `github.com/platform-mesh/<component-name>` | `github.com/platform-mesh/security-operator` |
+| Chart (new) | `github.com/platform-mesh/helm-charts/<chart-name>` | `github.com/platform-mesh/helm-charts/security-operator` |
+| Image (new) | `github.com/platform-mesh/images/<repo-name>` | `github.com/platform-mesh/images/security-operator` |
 
 ### OCM Component Structure
 
-**Image component (new, per image):**
+**Image component (new, per image — produced by source-repo pipeline):**
 
 ```yaml
 components:
-  - name: github.com/platform-mesh/<repo-name>-image
+  - name: github.com/platform-mesh/images/<repo-name>
     version: "{{ .APP_VERSION }}"
     provider:
       name: Platform Mesh Team
@@ -153,11 +181,11 @@ components:
           type: gitHub
 ```
 
-**Software component (updated, chart resource + image componentReference):**
+**Chart component (new — produced by chart pipeline):**
 
 ```yaml
 components:
-  - name: "{{ .COMPONENT_NAME }}"
+  - name: github.com/platform-mesh/helm-charts/<chart-name>
     version: "{{ .VERSION }}"
     provider:
       name: Platform Mesh Team
@@ -169,12 +197,8 @@ components:
         access:
           type: ociArtifact
           imageReference: "{{ .CHART_OCI_PATH }}:{{ .VERSION }}"
-    componentReferences:
-      - name: image
-        componentName: "github.com/platform-mesh/{{ .IMAGE_COMPONENT_NAME }}-image"
-        version: "{{ .APP_VERSION }}"
     sources:
-      - name: chart
+      - name: source
         type: git
         version: "{{ .VERSION }}"
         access:
@@ -183,13 +207,38 @@ components:
           type: gitHub
 ```
 
+**Root component (new — produced by `ocm` repo pipeline, references chart + image):**
+
+```yaml
+components:
+  - name: "{{ .COMPONENT_NAME }}"
+    version: "{{ .VERSION }}"
+    provider:
+      name: Platform Mesh Team
+    componentReferences:
+      - name: chart
+        componentName: "github.com/platform-mesh/helm-charts/{{ .CHART_NAME }}"
+        version: "{{ .VERSION }}"
+      - name: image
+        componentName: "github.com/platform-mesh/images/{{ .IMAGE_COMPONENT_NAME }}"
+        version: "{{ .APP_VERSION }}"
+```
+
 ### Software Component Versioning
 
-The chart version is the leading version. Since image builds trigger chart version updates (bumping both `appVersion` and `chartVersion`), every image change results in a new chart release. The software component version in the aggregator (`platform-mesh/ocm`) follows the chart version directly. The image OCM component is versioned independently (matching the image tag). The chart pipeline uses `appVersion` to pin the `componentReference` to the matching image component version, ensuring consistency between chart and image in the resulting OCM component.
+The chart version is the leading version. Since image builds trigger chart version updates (bumping both `appVersion` and `chartVersion`), every image change results in a new chart release. The root component version follows the chart version. The chart component is versioned by the chart version. The image component is versioned independently (matching the image tag). The `ocm` repo pipeline assembles the root component using `appVersion` to pin the image component reference to the matching image component version, establishing an explicit dependency between chart and image versions.
+
+This explicit version pinning addresses the need for traceable multi-version support — when maintaining multiple version streams (e.g. `v1.*.*` and `v2.*.*` in parallel), the root component clearly records which image version belongs to which chart version.
+
+### Standalone Helm Compatibility
+
+The `appVersion` field in `Chart.yaml` continues to be updated on every image build, preserving the ability to install charts without OCM. Users who deploy via Helm directly (without OCM) still get the correct image version resolved from `appVersion`. Users who prefer to pin image versions via values can use Renovate to follow the OCM image component for automated updates.
+
+When deploying via OCM, the `appVersion` value in the chart is overridden by the image version from the component reference, making OCM the authoritative source for image versions in the standard deployment.
 
 ### Integrating Image OCM Components with the Existing Chart Release Flow
 
-The existing chart-version-update flow is preserved. The structural change is how the software component models image dependencies — using `componentReferences` to the image OCM component instead of embedding the image resource directly.
+The existing chart-version-update flow is preserved. The structural change is how the software component models its artifacts — chart and image are both referenced components under a root, rather than a monolithic component with embedded resources.
 
 **Today:**
 
@@ -198,26 +247,29 @@ The existing chart-version-update flow is preserved. The structural change is ho
 
 **Proposed:**
 
-1. Source repo builds image `1.2.3`, generates SBOMs, publishes image OCM component (`<repo>-image` with image + SBOMs).
+1. Source repo builds image `1.2.3`, generates SBOMs, publishes image OCM component (`images/<repo-name>` with image + SBOMs).
 2. Source repo calls [`job-chart-version-update.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-chart-version-update.yml) to bump `appVersion` and `chartVersion` (unchanged from today).
-3. Chart pipeline runs, creates OCM component with chart resource + `componentReference` to the image OCM component (using `appVersion` to resolve the correct image component version) + sources.
+3. Chart pipeline runs, creates the **chart component** (`helm-charts/<chart-name>`) containing only the Helm chart resource, then triggers the `ocm` repo.
+4. The `ocm` repo pipeline assembles the **root component** (`<component-name>`) referencing the chart component (at the chart version) and the image component (at `appVersion`), then transfers and triggers the aggregator.
 
 Key points:
 
-* **OCM is authoritative for image versions** in the standard platform-mesh deployment. The OCM component reference determines which image version is deployed, not the `appVersion` field.
-* **`appVersion` is updated for compatibility** — it continues to be bumped on every image build so that standalone Helm deployments (without OCM) still resolve the correct image tag. It also drives the `componentReference` version in the software component.
+* **OCM is authoritative for image versions** in the standard platform-mesh deployment. The root component's reference to the image component determines which image version is deployed.
+* **`appVersion` is updated for compatibility** — it continues to be bumped on every image build so that standalone Helm deployments (without OCM) still resolve the correct image tag. It also drives the image `componentReference` version in the root component.
 * **Chart version remains the leading version** for releases — the existing versioning model is unchanged.
-* **Structural improvement:** Image SBOMs are now accessible via the component reference. The software component no longer embeds the image resource directly but references the image component that carries both the image and its SBOMs.
+* **Explicit version binding:** The root component records exactly which chart version and image version belong together, enabling reproducible deployments and multi-version support.
+* **Clean separation of responsibilities:** Each pipeline owns exactly one artifact type — source repos own images, chart repos own charts, and the `ocm` repo owns the composition of root components.
 
 ### Third-Party / Upstream Images
 
-The same pattern should be applied to third-party images that are rebuilt from the `platform-mesh/ocm` repo (e.g. Keycloak, PostgreSQL, and other upstream images). Each upstream image build should produce its own OCM image component with SBOMs, so that software components referencing these images can use `componentReferences` consistently — regardless of whether the image is built in-house or rebuilt from upstream.
+The same pattern should be applied to third-party images that are rebuilt from the `platform-mesh/ocm` repo (e.g. Keycloak, PostgreSQL, and other upstream images). Each upstream image build should produce its own OCM image component with SBOMs, so that root components referencing these images can use `componentReferences` consistently — regardless of whether the image is built in-house or rebuilt from upstream.
 
 ### Migration Strategy
 
-1. Implement `job-sbom.yml` and `job-image-ocm.yml` as new reusable workflows.
+1. Implement `job-sbom.yml`, `job-image-ocm.yml`, and `job-chart-ocm.yml` as new reusable workflows.
 2. Update [`pipeline-golang-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-golang-app.yml) and [`pipeline-node-app.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/pipeline-node-app.yml): add `job-sbom` + `job-image-ocm` before the existing `job-chart-version-update` step. The image OCM component is published before triggering the chart version update.
-3. Update [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) to support `componentReferences` (backward-compatible — existing constructors keep working).
-4. Migrate chart repos one-by-one: switch [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) from inline image resources to component references. `appVersion` continues to be updated by `job-chart-version-update` as today.
-5. Apply the same SBOM + image-component pattern to upstream/third-party image builds.
-6. Update the OCM aggregator (`platform-mesh/ocm`) to resolve the new component-reference tree.
+3. Implement `pipeline-root-component.yml` in the `ocm` repo: receives component name, chart version, and `appVersion` as inputs, assembles the root component with `componentReferences`, transfers to the registry, and triggers the aggregator.
+4. Update [`job-ocm.yml`](https://github.com/platform-mesh/.github/blob/main/.github/workflows/job-ocm.yml) to produce only a chart component and trigger the `ocm` repo pipeline (backward-compatible — existing constructors keep working during migration).
+5. Migrate chart repos one-by-one: switch [`component-constructor.yaml`](https://github.com/platform-mesh/helm-charts/blob/main/.ocm/component-constructor.yaml) from the monolithic component to chart-only component constructors. `appVersion` continues to be updated by `job-chart-version-update` as today.
+6. Apply the same SBOM + image-component pattern to upstream/third-party image builds.
+7. Update the OCM aggregator (`platform-mesh/ocm`) to resolve the new component-reference tree.
