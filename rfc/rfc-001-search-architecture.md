@@ -6,7 +6,7 @@ Date: 2026-02-17
 
 ## Summary
 
-This RFC proposes a generic search engine architecture for Platform Mesh that enables advanced searching capabilities (partial word search, fuzzy search, semantic search) across KCP resources with fine-grained authorization using OpenFGA. The architecture introduces a `SearchIndex` APIResourceSchema and a search operator that integrates with OpenSearch to provide per-organization search indexes and handles indexing of various APIResources. One `SearchIndex` resource is created per organization, all residing in the `root:orgs` workspace, which acts as the single management point for org-level search configuration.
+This RFC proposes a generic search engine architecture for Platform Mesh that enables advanced searching capabilities (partial word search, fuzzy search, semantic search) across kcp resources with fine-grained authorization using OpenFGA. The architecture introduces a `SearchIndex` APIResourceSchema and a search operator that integrates with OpenSearch to provide per-organization search indexes and handles indexing of various APIResources. One `SearchIndex` resource is created per organization, all residing in the `root:orgs` workspace, which acts as the single management point for org-level search configuration.
 
 ## Context and Problem Statement
 
