@@ -6,9 +6,9 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.** APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportBinding` resource for that APIExport
-2. Platform-mesh administrator configure `APIExportBinding` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
-3. The security-operator reconciles `APIExportBinding` resources and writes tuples directly to the appropriate FGA stores.
+1. **APIExports are not bindable by default.** APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportPolicy` resource for that APIExport
+2. Platform-mesh administrator configure `APIExportPolicy` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
+3. The security-operator reconciles `APIExportPolicy` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
 
 ### Roles
@@ -16,8 +16,8 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 | Role | Responsibility |
 |---|---|
 | API Provider | Creates APIExport resource, have no control over bindability of his API. |
-| Platform-mesh Operator/Administator | Defines `APIExportBinding` resources controling which API's can be used in the organizations. |
-| Security Operator | Reconcile `APIExportBinding` resources in platform-mesh-system and creates needed tuples |
+| Platform-mesh Operator/Administator | Defines `APIExportPolicy` resources controling which API's can be used in the organizations. |
+| Security Operator | Reconcile `APIExportPolicy` resources in platform-mesh-system and creates needed tuples |
 | Organization Admin | Can further restrict binding permissions within their own org (future). |
 
 ## FGA Authorization Model Changes
@@ -50,16 +50,16 @@ This schema update will make us able to allow apiExport binding for:
     - platform-mesh-system
 
 E.g in this kcp structure:
-1. to grant binding permissions only for account C, the system would need to have `APIExportBinding` resource with - `root:orgs:org1:accountA:accountB:accountC` path expression
-2. to grant binding persmissions for every account in org1, the system would need to have `APIExportBinding` resource with - `root:orgs:org1:*` path expression
-3. to grant binding persmissions for every account in the system, the system would need to have `APIExportBinding` resource with - `root:orgs:*` path expression
+1. to grant binding permissions only for account C, the system would need to have `APIExportPolicy` resource with - `root:orgs:org1:accountA:accountB:accountC` path expression
+2. to grant binding persmissions for every account in org1, the system would need to have `APIExportPolicy` resource with - `root:orgs:org1:*` path expression
+3. to grant binding persmissions for every account in the system, the system would need to have `APIExportPolicy` resource with - `root:orgs:*` path expression
 
 ## Binding CRD Schema
 
 
 ```yaml
 apiVersion: security.platform-mesh.io/v1alpha1
-kind: APIExportBinding
+kind: APIExportPolicy
 metadata:
   name: orchestrate-platform-mesh-io
   namespace: platform-mesh-system
@@ -68,7 +68,7 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: <provider-logical-cluster-id>
 
-  pathExpressions:
+  allowPathExpressions:
     # path which ends on workspace name without :* should grant access only for one specific account and his child accounts should have no binding permissions
     - root:orgs:default:abc
     - root:orgs:default:cde 
@@ -89,7 +89,7 @@ status:
     - root:orgs:demo:*
 ```
 
-The `APIExportBinding` CR is created by platform-mesh administrator. The security operator reconciles the `APIExportBinding` resource and creates required tuples.
+The `APIExportPolicy` CR is created by platform-mesh administrator. The security operator reconciles the `APIExportPolicy` resource and creates required tuples.
 
 ## Scenarios
 
@@ -194,14 +194,14 @@ user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ## Component Responsibilities
 
 ### platform-mesh operator/administrator
-- Creates `APIExportBinding` resources based on defined configuration, e.g. in helm-charts repo or by some admin view UI in future
+- Creates `APIExportPolicy` resources based on defined configuration, e.g. in helm-charts repo or by some admin view UI in future
 
-### APIExportBinding controller (security-operator)
+### APIExportPolicy controller (security-operator)
 
-- Watches `APIExportBinding` CRs in platform-mesh-system.
-- For each `APIExportBinding`, interprets `pathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
+- Watches `APIExportPolicy` CRs in platform-mesh-system.
+- For each `APIExportPolicy`, interprets `pathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
 - For each resolved workspace, looks up AccountInfo / FGA store and writes one bind tuple 
-- When `pathExpressions` change or `APIExportBinding` is deleted: removes stale tuples from FGA.
+- When `pathExpressions` change or `APIExportPolicy` is deleted: removes stale tuples from FGA.
 
 ### Authorization Webhook
 
@@ -233,5 +233,5 @@ Check(
 | All orgs (`pathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
 
 ## Open Considerations
-- **Mechanism to validate ApiExport**: without an ability to automate `APIExportBinding` creation for ApiExports, it would be impossible to become provider without Platform Mesh administrator intervention 
+- **Mechanism to validate ApiExport**: without an ability to automate `APIExportPolicy` creation for ApiExports, it would be impossible to become provider without Platform Mesh administrator intervention 
 - **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
