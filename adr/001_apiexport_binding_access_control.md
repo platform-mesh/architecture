@@ -82,7 +82,7 @@ status:
     - type: Ready
       status: "True"
   # to efectivelly remove tuples if expressions have changed
-  managedExpressions:
+  managedAllowExpressions:
     - root:orgs:default:abc
     - root:orgs:default:cde 
     - root:orgs:*
@@ -102,7 +102,7 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
-  allowedPathExpressions:
+  allowPathExpressions:
     - root:orgs:org1:accountA:accountB:accountC
 ```
 
@@ -139,7 +139,7 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
-  allowedPathExpressions:
+  allowPathExpressions:
     - root:orgs:org1:*
 ```
 
@@ -167,7 +167,7 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
-  allowedPathExpressions:
+  allowPathExpressions:
     - root:orgs:*
 ```
 
@@ -198,15 +198,15 @@ user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 
 ### platform-mesh operator
 - define ApiResourceSchema for `APIExportPolicy` resource
-- define ApiExport security.platform-mesh.io (naming may change in future) which references ApiResourceSchema for `APIExportPolicy` resource
-- define ApiBinding for security.platform-mesh.io ApiExport
+- define ApiExport `security.platform-mesh.io` (naming may change in future) which references ApiResourceSchema for `APIExportPolicy` resource
+- define ApiBinding for `security.platform-mesh.io` ApiExport
 
 ### APIExportPolicy controller (security-operator)
 
 - Reconcile `APIExportPolicy` CRs by looking for the dedicated ApiExportEndpointSlice (e.g. security.platform-mesh.io).
-- For each `APIExportPolicy`, interprets `allowedPathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
+- For each `APIExportPolicy`, interprets `allowPathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
 - For each resolved workspace, looks up AccountInfo / FGA store and writes one bind tuple 
-- When `allowedPathExpressions` change or `APIExportPolicy` is deleted: removes stale tuples from FGA.
+- When `allowPathExpressions` change or `APIExportPolicy` is deleted: removes stale tuples from FGA.
 
 ### Authorization Webhook
 
@@ -233,9 +233,9 @@ Check(
 | Scenario | Tuples per APIExport | Where |
 |---|---|---|
 | No Binding / not bindable | 0 | nowhere |
-| One account only (`allowedPathExpressions`: concrete account path) | 1 | consumer org store containing that account |
-| One org subtree (`allowedPathExpressions`: `root:orgs:<org>:*`) | 1 | that org’s FGA store |
-| All orgs (`allowedPathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
+| One account only (`allowPathExpressions`: concrete account path) | 1 | consumer org store containing that account |
+| One org subtree (`allowPathExpressions`: `root:orgs:<org>:*`) | 1 | that org’s FGA store |
+| All orgs (`allowPathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
 
 ## Open Considerations
 - **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
