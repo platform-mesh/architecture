@@ -98,8 +98,8 @@ Pending(d, message)               // not yet ready, continue chain, requeue afte
 // Halt chain with requeue — return (Result, nil) — resource is NOT ready
 StopWithRequeue(d, message)       // halt chain, requeue after duration (transient blocker)
 
-// Halt chain permanently — return (Result, nil) — resource will NOT become ready
-Stop(message)                     // halt chain, do NOT requeue (user intervention needed)
+// Halt chain, no explicit requeue — return (Result, nil)
+Stop(message)                     // halt chain, rely on default resync for next reconcile
 ```
 
 Examples:
@@ -146,11 +146,11 @@ func (s *CertSubroutine) Process(ctx context.Context, instance client.Object) (R
     return Result{}, nil
 }
 
-// Known permanent failure — stop chain, no requeue
+// Known failure — stop chain, no explicit requeue (default resync will re-trigger)
 // → Subroutine condition: False/Stopped ("spec.endpoint is required")
 // → Ready condition: False
 // → Remaining subroutines: skipped
-// → No requeue (user must fix the spec)
+// → No explicit requeue (default resync will re-trigger)
 func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
     if instance.Spec.Endpoint == "" {
         return Stop("spec.endpoint is required"), nil
@@ -171,7 +171,7 @@ After all subroutines have run, conditions are updated, ErrorReporters called, a
 | `OKWithRequeue(d), nil` | yes | after `d` | no | True |
 | `Pending(d, message), nil` | yes | after `d` | no | **Unknown** |
 | `StopWithRequeue(d, message), nil` | **no** | after `d` | no | **False** |
-| `Stop(message), nil` | **no** | **no** | no | **False** |
+| `Stop(message), nil` | **no** | default resync | no | **False** |
 | `Result{}, err` | **yes** | CR rate limiter | **yes** | **False** |
 
 **Key distinction:**
