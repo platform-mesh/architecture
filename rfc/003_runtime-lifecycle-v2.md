@@ -37,9 +37,9 @@ The `runtime` package is a clean-room rewrite. It targets **multicluster-runtime
 1. **One path, not two** — One base subroutine interface, opt-in phase interfaces, one result type, one processing loop.
 2. **Explicit over implicit** — The result type tells the lifecycle *exactly* what to do. No boolean flags on error types.
 3. **Composable, not configurable** — Prefer small, composable pieces over a builder with many flags.
-4. **Results carry intent, errors are unexpected** — `Result` communicates the subroutine's intent: continue, stop, fail, requeue timing. The Go `error` return signals unexpected failures (API timeouts, network issues). These are two separate concerns: `Result` drives the business outcome, `error` signals something went wrong. After all subroutines run and status is updated, collected errors are returned to controller-runtime so its rate limiter handles backoff.
+4. **Results carry intent, errors are unexpected** — `Result` communicates the subroutine's intent: continue, stop, requeue timing. The Go `error` return signals unexpected failures (API timeouts, network issues). These are two separate concerns: `Result` drives the business outcome, `error` signals something went wrong. After all subroutines run and status is updated, collected errors are returned to controller-runtime so its rate limiter handles backoff.
 5. **Standard `error`, no custom error interface** — The current lifecycle uses `OperatorError` (a custom interface with `Err() error`, `Retry() bool`, `Sentry() bool`) to bundle flow control and reporting hints into the error itself. This is unnecessary when `Result` carries flow control and `ErrorReporter` handles reporting. Runtime v2 uses plain `error` everywhere. Standard Go errors, `fmt.Errorf` wrapping, `errors.Is`/`errors.As` — nothing custom.
-6. **Errors don't stop the chain** — Unexpected errors (Go `error` return) do not halt processing. The lifecycle continues to run all subroutines so that conditions reflect the full state. Only `StopWithRequeue` and `Fail` (explicit `Result` values) halt the chain — these are intentional decisions, not side effects of failure.
+6. **Errors don't stop the chain** — Unexpected errors (Go `error` return) do not halt processing. The lifecycle continues to run all subroutines so that conditions reflect the full state. Only `StopWithRequeue` and `Stop` (explicit `Result` values) halt the chain — these are intentional decisions, not side effects of failure.
 7. **Subroutines don't persist directly** — Subroutines mutate the in-memory object (e.g., setting status fields, adding labels), but never call `client.Status().Update()` or `client.Update()` on the reconciled object. The lifecycle detects diffs and patches once after all subroutines have run — status and metadata always, spec only when opted in via `WithSpecPatch()`. This prevents partial writes, conflicting updates, and ensures patches reflect the complete reconciliation outcome. The cluster-scoped client is available via context (`runtime.ClientFromContext(ctx)`) for looking up other resources.
 
 ---
@@ -48,13 +48,13 @@ The `runtime` package is a clean-room rewrite. It targets **multicluster-runtime
 
 ### Result Type
 
-Every subroutine returns `(Result, error)`. `Result` carries the subroutine's intent (continue, stop, fail, requeue timing). The `error` return signals unexpected failures — the standard Go convention.
+Every subroutine returns `(Result, error)`. `Result` carries the subroutine's intent (continue, stop, requeue timing). The `error` return signals unexpected failures — the standard Go convention.
 
 ```go
 type Result struct {
     action  action         // what the lifecycle should do next (zero value = continue)
     requeue time.Duration  // when to reconcile again (zero = don't requeue from this subroutine)
-    reason  string         // human-readable explanation (for conditions/logging)
+    message string         // human-readable explanation (for conditions/logging)
 }
 ```
 
@@ -71,7 +71,7 @@ Terminate(ctx context.Context, instance client.Object) (Result, error)  // Termi
 
 When `error` is non-nil, the lifecycle logs the error, sets the subroutine's condition to False, calls the `ErrorReporter`, and **continues to the next subroutine**. Unexpected errors do not stop the chain — the lifecycle runs all subroutines and requeues at the end if any errors occurred. This ensures conditions reflect the full state of all subroutines, not just the first failure.
 
-To explicitly stop the chain, a subroutine returns `StopWithRequeue()` or `Fail()` as the `Result` — these are intentional decisions, not unexpected failures. The only field from `Result` the lifecycle uses when `error` is non-nil is `requeue` — allowing the subroutine to control retry timing (e.g., via a rate limiter).
+To explicitly stop the chain, a subroutine returns `StopWithRequeue()` or `Stop()` as the `Result` — these are intentional decisions, not unexpected failures. When `error` is non-nil, the `Result` is ignored — controller-runtime's rate limiter handles backoff for error cases.
 
 Fields are unexported. Construction happens through factory functions, which makes illegal states unrepresentable. For the common case, the **zero value is meaningful**:
 
@@ -93,17 +93,13 @@ OK()                              // succeeded, continue (same as Result{})
 OKWithRequeue(30 * time.Second)   // succeeded, but requeue after duration (e.g., polling)
 
 // Not ready, but let others run — return (Result, nil)
-Pending(d, reason)                // not yet ready, continue chain, requeue after duration
+Pending(d, message)               // not yet ready, continue chain, requeue after duration
 
 // Halt chain with requeue — return (Result, nil) — resource is NOT ready
-StopWithRequeue(d, reason)        // halt chain, requeue after duration (transient blocker)
+StopWithRequeue(d, message)       // halt chain, requeue after duration (transient blocker)
 
 // Halt chain permanently — return (Result, nil) — resource will NOT become ready
-Fail(reason)                      // halt chain, do NOT requeue (user intervention needed)
-
-// Unexpected errors — return (Result, error)
-// Just return the error. Optionally set requeue timing for custom retry delay.
-RequeueAfter(d)                   // helper: Result with only requeue set (use with error return)
+Stop(message)                     // halt chain, do NOT requeue (user intervention needed)
 ```
 
 Examples:
@@ -125,19 +121,6 @@ func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Res
     if err := s.callAPI(ctx); err != nil {
         return Result{}, err
     }
-    return Result{}, nil
-}
-
-// Unexpected error with custom retry timing (e.g., rate limiter)
-// → Subroutine condition: False/Error ("rate limited")
-// → Ready condition: False
-// → ErrorReporter: called
-func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
-    if err := s.callAPI(ctx); err != nil {
-        delay := s.rateLimiter.When(instance.GetName())
-        return RequeueAfter(delay), err
-    }
-    s.rateLimiter.Forget(instance.GetName())
     return Result{}, nil
 }
 
@@ -164,19 +147,19 @@ func (s *CertSubroutine) Process(ctx context.Context, instance client.Object) (R
 }
 
 // Known permanent failure — stop chain, no requeue
-// → Subroutine condition: False/Failed ("spec.endpoint is required")
+// → Subroutine condition: False/Stopped ("spec.endpoint is required")
 // → Ready condition: False
 // → Remaining subroutines: skipped
 // → No requeue (user must fix the spec)
 func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
     if instance.Spec.Endpoint == "" {
-        return Fail("spec.endpoint is required"), nil
+        return Stop("spec.endpoint is required"), nil
     }
     return Result{}, nil
 }
 ```
 
-Only `StopWithRequeue` and `Fail` halt the chain — these are intentional decisions by the subroutine. Unexpected errors (`error` return) do not stop the chain; the lifecycle continues to give all subroutines a chance to run.
+Only `StopWithRequeue` and `Stop` halt the chain — these are intentional decisions by the subroutine. Unexpected errors (`error` return) do not stop the chain; the lifecycle continues to give all subroutines a chance to run.
 
 After all subroutines have run, conditions are updated, ErrorReporters called, and status patched, the lifecycle **returns collected subroutine errors to controller-runtime**. This lets controller-runtime's built-in rate limiter handle exponential backoff and ensures errors are visible in controller-runtime's own metrics and logging. If multiple subroutines errored, errors are joined via `errors.Join`.
 
@@ -186,19 +169,18 @@ After all subroutines have run, conditions are updated, ErrorReporters called, a
 |---|---|---|---|---|
 | `Result{}, nil` / `OK(), nil` | yes | no | no | True |
 | `OKWithRequeue(d), nil` | yes | after `d` | no | True |
-| `Pending(d, reason), nil` | yes | after `d` | no | **Unknown** |
-| `StopWithRequeue(d, reason), nil` | **no** | after `d` | no | **False** |
-| `Fail(reason), nil` | **no** | **no** | no | **False** |
-| `Result{}, err` | **yes** | error returned to CR | **yes** | **False** |
-| `RequeueAfter(d), err` | **yes** | after `d` | **yes** | **False** |
+| `Pending(d, message), nil` | yes | after `d` | no | **Unknown** |
+| `StopWithRequeue(d, message), nil` | **no** | after `d` | no | **False** |
+| `Stop(message), nil` | **no** | **no** | no | **False** |
+| `Result{}, err` | **yes** | CR rate limiter | **yes** | **False** |
 
 **Key distinction:**
-- `StopWithRequeue` / `Fail` = intentional chain halt (the subroutine knows further processing is pointless)
+- `StopWithRequeue` / `Stop` = intentional chain halt (the subroutine knows further processing is pointless)
 - `error` = unexpected failure, but the lifecycle continues — other subroutines may be independent and should still run
 
 This means conditions always reflect the **full state** of all subroutines, not just the first failure. Operators see which subroutines are healthy and which are failing, in a single reconciliation.
 
-**Error reporting** — `ErrorReporter` is called inline, as each subroutine returns a non-nil `error`. Known business conditions (`StopWithRequeue`, `Fail`) are not reported — they are intentional decisions, not unexpected failures.
+**Error reporting** — `ErrorReporter` is called inline, as each subroutine returns a non-nil `error`. Known business conditions (`StopWithRequeue`, `Stop`) are not reported — they are intentional decisions, not unexpected failures.
 
 **Error propagation** — After all subroutines run, conditions are updated, and status is patched, `Lifecycle.Reconcile` collects every non-nil `error` from the subroutine run (via `errors.Join` if multiple) and returns the joined error to controller-runtime. This lets controller-runtime's rate limiter handle exponential backoff. Infrastructure failures (status patch, finalizer patch) are joined into the same return error.
 
@@ -249,9 +231,9 @@ type Initializer interface {
 }
 
 // Terminator is implemented by subroutines that participate in KCP workspace termination.
-// When the lifecycle is configured with a terminator name, subroutines implementing this
-// interface have Terminate() called instead of Finalize() during the termination phase
-// (deletion without finalizer).
+// When the lifecycle is configured with a terminator name and the object is being deleted,
+// subroutines implementing this interface have Terminate() called. This covers KCP workspace
+// deletion where objects are removed without honoring finalizers.
 type Terminator interface {
     Terminate(ctx context.Context, instance client.Object) (Result, error)
 }
@@ -296,7 +278,7 @@ lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
 
 - **Finalizer**: On first reconcile, the lifecycle adds finalizers from all subroutines that implement `Finalizer`. On deletion, `Finalize()` is called in reverse order; finalizers are removed after successful finalization. Subroutines that don't implement `Finalizer` are skipped during deletion.
 - **Initializer**: When configured and the object is not being deleted, subroutines implementing `Initializer` have `Initialize()` called instead of `Process()`. On successful reconciliation (no requeue), the lifecycle removes the initializer name from the object's status.
-- **Terminator**: When configured and the object is being deleted, subroutines implementing `Terminator` have `Terminate()` called instead of `Finalize()`. This handles the KCP pattern where cleanup happens without finalizers. On successful reconciliation, the lifecycle removes the terminator from the object's status.
+- **Terminator**: When configured and the object is being deleted, subroutines implementing `Terminator` have `Terminate()` called. In KCP, workspace deletion removes objects without honoring finalizers — `Terminate()` gives subroutines a chance to clean up in that scenario. On successful reconciliation, the lifecycle removes the terminator from the object's status.
 
 **Changes from current:**
 
@@ -396,7 +378,7 @@ lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
 │     │   - If error: call ErrorReporter,        │           │
 │     │     track for requeue, continue           │           │
 │     │   - Track min requeue duration           │           │
-│     │   - On StopWithRequeue/Fail: break loop   │           │
+│     │   - On StopWithRequeue/Stop: break loop    │           │
 │     │     (intentional halt only)              │           │
 │     └──────────────────────────────────────────┘           │
 │                                                            │
@@ -434,14 +416,14 @@ Condition reasons map directly to the result:
 |---|---|---|---|---|
 | `OK(), nil` | True | `Complete` | True (if all subs complete) | static |
 | `OKWithRequeue(d), nil` | True | `Complete` | True (if all subs complete) | static |
-| `Pending(d, reason), nil` | Unknown | `Pending` | False | `reason` string |
-| `StopWithRequeue(d, reason), nil` | False | `Stopped` | False | `reason` string |
-| `Fail(reason), nil` | False | `Failed` | False | `reason` string |
+| `Pending(d, message), nil` | Unknown | `Pending` | False | `message` string |
+| `StopWithRequeue(d, message), nil` | False | `Stopped` | False | `message` string |
+| `Stop(message), nil` | False | `Stopped` | False | `message` string |
 | `_, err` | False | `Error` | False | `err.Error()` |
 
-The aggregate `Ready` condition is only True when **all** subroutines completed with `OK()` (including `OKWithRequeue`) and no subroutine returned `Pending`, `StopWithRequeue`, `Fail`, or `error`.
+The aggregate `Ready` condition is only True when **all** subroutines completed with `OK()` (including `OKWithRequeue`) and no subroutine returned `Pending`, `StopWithRequeue`, `Stop`, or `error`.
 
-The `reason` string from `Pending`/`StopWithRequeue`/`Fail` and `err.Error()` from error returns flow into the subroutine condition message, giving operators clear visibility into exactly which subroutine is blocking readiness and why.
+The `message` string from `Pending`/`StopWithRequeue`/`Stop` and `err.Error()` from error returns flow into the condition's `.message` field, giving operators clear visibility into exactly which subroutine is blocking readiness and why. The condition's `.reason` field (machine-readable, CamelCase) is set automatically from the result type (`Complete`, `Pending`, `Stopped`, `Error`).
 
 The instance must implement:
 
@@ -486,7 +468,7 @@ The `ErrorReporter` interface:
 
 ```go
 // ErrorReporter receives unexpected errors that occurred during reconciliation.
-// It is called only when a subroutine returns a non-nil error — NOT for Fail(),
+// It is called only when a subroutine returns a non-nil error — NOT for Stop(),
 // which represents a known business condition, not an unexpected error.
 //
 // The runtime package provides this interface only — no implementations are shipped.
@@ -557,35 +539,17 @@ lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
 
 This is the same concept as today's `WithStaticThenExponentialRateLimiter()`, but accepts any `workqueue.TypedRateLimiter` — not locked to a single strategy.
 
-**Per-subroutine** — Fine-grained backoff within a reconciliation. Each subroutine can manage its own rate limiter and communicate retry timing via `RequeueAfter`:
-
-```go
-func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
-    if err := s.doWork(ctx, instance); err != nil {
-        // The subroutine decides its own backoff
-        delay := s.rateLimiter.When(instance.GetName())
-        return RequeueAfter(delay), err
-    }
-    s.rateLimiter.Forget(instance.GetName())
-    return Result{}, nil
-}
-```
-
-A subroutine can use any rate limiter implementation — `workqueue.DefaultTypedItemBasedRateLimiter`, a custom exponential backoff, a static delay, or no rate limiter at all (just return a fixed duration).
-
 **How they interact:**
 
-- The lifecycle tracks the minimum `RequeueAfter` across all subroutine results and returns it as `ctrl.Result{RequeueAfter: minDuration}`
+- For successful results (`nil` error), the lifecycle tracks the minimum requeue duration across all subroutine results and returns it as `ctrl.Result{RequeueAfter: minDuration}`
+- For error results, controller-runtime [ignores the `Result`](https://github.com/kubernetes-sigs/controller-runtime/blob/v0.23.1/pkg/reconcile/reconcile.go#L117) and uses its rate limiter for backoff
 - The controller-level rate limiter governs the work queue independently — it applies regardless of subroutine-level timing
-- Both levels are optional and independent
 
 **What changes from current:**
 
 | Aspect | golang-commons | runtime v2 |
 |---|---|---|
-| Controller-level limiter | `WithStaticThenExponentialRateLimiter()` (fixed strategy) | `WithRateLimiter()` (any `workqueue.TypedRateLimiter`) |
-| Per-subroutine limiter | Possible but not part of the lifecycle API | First-class via `RequeueAfter` in `Result` |
-| Backoff strategy | Fixed (static-then-exponential) | Any — at both levels |
+| Controller-level limiter | `WithStaticThenExponentialRateLimiter()` only — no way to pass an arbitrary limiter | `WithRateLimiter()` accepts any `workqueue.TypedRateLimiter` |
 
 ### Observability: Tracing
 
@@ -610,7 +574,7 @@ Every subroutine span carries structured attributes:
 |---|---|
 | `subroutine.name` | `"StoreSubroutine"` |
 | `subroutine.action` | `"process"` or `"finalize"` |
-| `subroutine.outcome` | `"ok"`, `"pending"`, `"stop"`, `"fail"`, `"error"` |
+| `subroutine.outcome` | `"ok"`, `"pending"`, `"stop"`, `"error"` |
 | `subroutine.requeue` | `"30s"` or `""` |
 | `subroutine.error` | error message (if any) |
 
@@ -628,7 +592,7 @@ Controller-runtime already provides reconcile-level metrics (`controller_runtime
 | `lifecycle_subroutine_errors_total` | Counter | `controller`, `subroutine`, `outcome` | Subroutine error count by type |
 | `lifecycle_subroutine_requeue_seconds` | Histogram | `controller`, `subroutine`, `outcome` | Requeue delay requested by subroutine |
 
-Outcome labels: `ok`, `pending`, `stop`, `fail`, `error`.
+Outcome labels: `ok`, `pending`, `stop`, `error`.
 
 This gives operators dashboards for:
 - Which subroutines are slow
@@ -654,7 +618,7 @@ The lifecycle manages structured logging automatically. Before each subroutine c
 **What the lifecycle logs:**
 
 - Subroutine start/completion at Debug level
-- Result outcomes (stop, fail, pending) at Info level — these are state transitions
+- Result outcomes (stop, pending) at Info level — these are state transitions
 - Errors at Error level, with the full error message
 - Status patch at Debug level (only when changed)
 
@@ -676,17 +640,17 @@ Condition management is one of the strongest features of the current lifecycle a
 
 1. **Per-subroutine conditions** — Each subroutine gets a `{Name}_Ready` (or `{Name}_Finalize`) condition that reflects its last outcome. This makes it trivial to see which subroutine is blocking readiness.
 
-2. **Aggregate Ready condition** — A top-level `Ready` condition that summarizes the overall state. Only `True` when all subroutines completed with `OK()` or `OKWithRequeue()` — no `Pending`, `StopWithRequeue`, `Fail`, or errors.
+2. **Aggregate Ready condition** — A top-level `Ready` condition that summarizes the overall state. Only `True` when all subroutines completed with `OK()` or `OKWithRequeue()` — no `Pending`, `StopWithRequeue`, `Stop`, or errors.
 
 3. **Generation-aware** — Conditions are updated with the observed generation, so tools can distinguish "ready at gen 3" from "ready at gen 5."
 
-4. **Reason/message from results** — The `reason` string from `Pending(d, reason)`, `StopWithRequeue(d, reason)`, and `Fail(reason)` flows into the condition message, and `err.Error()` from error returns does the same, giving operators clear visibility (e.g., `"spec.endpoint is required"` instead of just `"Error"`).
+4. **Reason/message from results** — The `message` string from `Pending(d, message)`, `StopWithRequeue(d, message)`, and `Stop(message)` flows into the condition's `.message` field, and `err.Error()` from error returns does the same. The condition's `.reason` (machine-readable) is set automatically from the result type. This gives operators clear visibility (e.g., message `"spec.endpoint is required"` with reason `Stopped` instead of a generic `"Error"`).
 
 5. **Opt-in** — Controllers that don't need conditions (e.g., simple cleanup controllers) pay no cost.
 
 **What changes:**
 
-- Condition reasons are richer, mapping directly to result types (`Complete`, `Pending`, `Stopped`, `Failed`, `Error`)
+- Condition reasons are richer, mapping directly to result types (`Complete`, `Pending`, `Stopped`, `Error`)
 - The `ConditionAccessor` interface replaces `RuntimeObjectConditions` (same shape, shorter name)
 
 ### Automatic Finalizer Management (preserved)
@@ -726,7 +690,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 |---|---|---|
 | **Runtime support** | controller-runtime + multicluster-runtime | multicluster-runtime only |
 | **Subroutine result** | `(ctrl.Result, OperatorError)` | `(Result, error)` — mirrors Go/controller-runtime convention |
-| **Flow control** | error = stop, no error = continue | `Result` for intent (OK/Pending/StopWithRequeue/Fail), `error` for unexpected failures |
+| **Flow control** | error = stop, no error = continue | `Result` for intent (OK/Pending/StopWithRequeue/Stop), `error` for unexpected failures |
 | **Error semantics** | `error` return stops chain + requeues | `error` continues chain; returned to CR after all subs run |
 | **Error type** | `OperatorError` custom interface | Standard Go `error`; flow control via `Result`, not error type |
 | **Error reporting** | Sentry baked into reconcile loop | `ErrorReporter` interface only; no implementation shipped |
@@ -751,9 +715,9 @@ PR #160 adds `ChainSubroutine` as a parallel interface alongside the existing `S
 | **Subroutine types** | `Subroutine` + `ChainSubroutine` + `BaseSubroutine` | `Subroutine` (base) + opt-in `Processor`, `Finalizer`, `Initializer`, `Terminator` |
 | **Lifecycle types** | `Lifecycle` + `ChainLifecycle` + `LifecycleCore` | Single `Lifecycle` |
 | **Backward compat** | Maintains, via type-switch | None (clean break) |
-| **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 4 Result actions (OK, Pending, StopWithRequeue, Fail) + Go `error` for unexpected failures |
+| **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 4 Result actions (OK, Pending, StopWithRequeue, Stop) + Go `error` for unexpected failures |
 | **Error propagation** | First error stops chain + returns immediately | All subs run; errors collected and returned after status patch |
-| **Error behavior** | ErrorContinue/ErrorStop split | Errors always continue; only `StopWithRequeue`/`Fail` halt the chain |
+| **Error behavior** | ErrorContinue/ErrorStop split | Errors always continue; only `StopWithRequeue`/`Stop` halt the chain |
 | **Skipped** | Explicit outcome | Not needed — return `OK()` |
 | **Condition manager** | `ConditionManager` | Single `ConditionManager` |
 | **Result construction** | Exported fields, multiple constructors | Unexported fields, constrained constructors |
@@ -763,8 +727,8 @@ The fundamental issue with PR #160 is that it creates a parallel API surface to 
 **Additional differences in Result design:**
 
 - No `Skipped` outcome. A subroutine that has nothing to do returns `Result{}, nil` — skip is not a meaningful state for the lifecycle to act on differently from success.
-- No `ErrorContinue` / `ErrorStop` distinction. Unexpected errors (Go `error` return) always continue the chain — the lifecycle runs all subroutines. To explicitly stop, use `StopWithRequeue()` or `Fail()`. This is simpler and gives better observability (all conditions updated in one pass).
-- No `ErrorRetry` / `ErrorStop` in `Result`. Unexpected errors use Go's standard `error` return. `Fail(reason)` is a known business condition (string, not error). Clean separation.
+- No `ErrorContinue` / `ErrorStop` distinction. Unexpected errors (Go `error` return) always continue the chain — the lifecycle runs all subroutines. To explicitly stop, use `StopWithRequeue()` or `Stop()`. This is simpler and gives better observability (all conditions updated in one pass).
+- No `ErrorRetry` / `ErrorStop` in `Result`. Unexpected errors use Go's standard `error` return. `Stop(message)` is a known business condition (string, not error). Clean separation.
 - Fields are unexported to prevent construction of invalid states.
 - Subroutine signature is `(Result, error)` — immediately familiar to any Go developer and controller-runtime user.
 
