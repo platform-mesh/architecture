@@ -1,9 +1,10 @@
 # RFC 001: API Provider Data and Provider UI Discovery in Platform Mesh
 
-| Status  | Proposed                                                     |
+| Status  | Implemented                                                  |
 |---------|--------------------------------------------------------------|
 | Author  | @nexus49                                                     |
 | Created | 2025-07-01                                                   |
+| Updated | 2026-03-03                                                   |
 | RFC PR  | [link](https://github.com/platform-mesh/architecture/pull/1) |
 
 ## Summary
@@ -42,7 +43,7 @@ Introduce a `ProviderMetadata` resource to store provider metadata. It should be
 
 **Example:**
 ```yaml
-apiVersion: api.platform-mesh.io/v1alpha1
+apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ProviderMetadata
 metadata:
   name: acme-example-provider
@@ -136,21 +137,21 @@ The diagram below illustrates various examples of how the `ContentConfiguration`
 ![diagram](./assets/content-configuration-examples.png)
 *Figure 2: Example scenarios of ContentConfiguration placement and their relationships to APIExport and ProviderMetadata resources. This demonstrates different ways UI configurations can be associated with providers and APIs across workspaces.*
 
-The Platform Mesh service would need to follow the following sequence of actions to gather all relevant `ContentConfiguration` resources:
+The [virtual-workspaces](https://github.com/platform-mesh/virtual-workspaces) service follows this sequence to gather all relevant `ContentConfiguration` resources:
 ```mermaid
 sequenceDiagram
   participant u as User
   participant p as Portal
-  participant pms as Platform Mesh Provider Service
+  participant vw as Virtual Workspace
 
   u->>p: access specific account<br>path :root:orgs:a:a
-  p->>pms: get contentconfigurations for<br>path :root:orgs:a:a
-  pms->>kcp: get api bindings in account a
-  pms->>kcp: get matching api exports for each apibinding
-  pms->>kcp: check if there are contentconfigurations <br>for each api export
-  pms->>kcp: check in the account workspace <br> if there are contentconfigurations
-  pms->>kcp: check in platform mesh provider workspace <br>if there are contentconfigurations for the account entity
-  pms-->>p: return all contentconfigurations
+  p->>vw: get contentconfigurations for<br>path :root:orgs:a:a
+  vw->>kcp: get api bindings in account a
+  vw->>kcp: get matching api exports for each apibinding
+  vw->>kcp: check if there are contentconfigurations <br>for each api export
+  vw->>kcp: check in the account workspace <br> if there are contentconfigurations
+  vw->>kcp: check in platform mesh provider workspace <br>if there are contentconfigurations for the account entity
+  vw-->>p: return all contentconfigurations
   p-->>u: display respective nodes <br>based on contentconfigurations
 ```
 
