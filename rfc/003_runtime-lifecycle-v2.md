@@ -34,7 +34,7 @@ The `runtime` package is a clean-room rewrite. It targets **multicluster-runtime
 
 ## Design Principles
 
-1. **One path, not two** — One subroutine interface, one result type, one processing loop.
+1. **One path, not two** — One base subroutine interface, opt-in phase interfaces, one result type, one processing loop.
 2. **Explicit over implicit** — The result type tells the lifecycle *exactly* what to do. No boolean flags on error types.
 3. **Composable, not configurable** — Prefer small, composable pieces over a builder with many flags.
 4. **Results carry intent, errors are unexpected** — `Result` communicates the subroutine's intent: continue, stop, fail, requeue timing. The Go `error` return signals unexpected failures (API timeouts, network issues). These are two separate concerns: `Result` drives the business outcome, `error` signals something went wrong. After all subroutines run and status is updated, collected errors are returned to controller-runtime so its rate limiter handles backoff.
@@ -63,7 +63,7 @@ The zero value `Result{}` means "success, continue to next subroutine" — the `
 **`Result` is always error-free.** Unexpected errors are returned as the second return value from the subroutine method, following the standard Go `(value, error)` pattern — identical to how controller-runtime's `Reconcile` returns `(ctrl.Result, error)`:
 
 ```go
-Process(ctx context.Context, instance client.Object) (Result, error)    // Subroutine
+Process(ctx context.Context, instance client.Object) (Result, error)    // Processor (opt-in)
 Finalize(ctx context.Context, instance client.Object) (Result, error)   // Finalizer (opt-in)
 Initialize(ctx context.Context, instance client.Object) (Result, error) // Initializer (opt-in)
 Terminate(ctx context.Context, instance client.Object) (Result, error)  // Terminator (opt-in)
@@ -198,31 +198,39 @@ After all subroutines have run, conditions are updated, ErrorReporters called, a
 
 This means conditions always reflect the **full state** of all subroutines, not just the first failure. Operators see which subroutines are healthy and which are failing, in a single reconciliation.
 
-`ErrorReporter` is only called for non-nil `error` returns. Known business conditions (`StopWithRequeue`, `Fail`) are not reported.
+**Error reporting** — `ErrorReporter` is called inline, as each subroutine returns a non-nil `error`. Known business conditions (`StopWithRequeue`, `Fail`) are not reported — they are intentional decisions, not unexpected failures.
 
-After all subroutines run, conditions are updated, and status is patched, `Lifecycle.Reconcile` returns the collected subroutine errors (via `errors.Join` if multiple) to controller-runtime. This lets controller-runtime apply its rate limiter for exponential backoff. Infrastructure failures (status patch, finalizer patch) are also returned as errors.
+**Error propagation** — After all subroutines run, conditions are updated, and status is patched, `Lifecycle.Reconcile` collects every non-nil `error` from the subroutine run (via `errors.Join` if multiple) and returns the joined error to controller-runtime. This lets controller-runtime's rate limiter handle exponential backoff. Infrastructure failures (status patch, finalizer patch) are joined into the same return error.
 
 ### Subroutine Interface
 
 ```go
-// Subroutine is the core interface. Every subroutine implements this.
+// Subroutine is the base interface. Every subroutine implements this.
 type Subroutine interface {
     GetName() string
+}
+
+// Processor is implemented by subroutines that perform forward-processing (reconciliation).
+// The lifecycle calls Process() for non-deleting reconciliations when no Initializer applies.
+type Processor interface {
     Process(ctx context.Context, instance client.Object) (Result, error)
 }
 ```
 
-The core interface is minimal: a name and the forward-processing method. Everything else — finalization, initialization, termination — is opt-in via additional interfaces. The lifecycle detects them via type-switch, the same pattern for all.
+The base interface carries only the name — the identity of the subroutine. All lifecycle phases — processing, finalization, initialization, termination — are opt-in via additional interfaces. The lifecycle detects them via type-switch, the same pattern for all.
+
+A subroutine that only needs cleanup on deletion implements `Subroutine` + `Finalizer` — no need for a no-op `Process()`. A subroutine that only reconciles implements `Subroutine` + `Processor`. Most subroutines will implement both.
 
 **Changes from current:**
 
+- `Process` moves from core `Subroutine` interface to opt-in `Processor` interface — consistent with `Finalizer`, `Initializer`, `Terminator`.
 - `Process` returns `(Result, error)` instead of `(ctrl.Result, OperatorError)`.
-- `Finalize`, `Finalizers`, `Initialize`, `Terminate` are no longer on the core interface — they move to opt-in interfaces (see below). A subroutine that only reconciles implements `Subroutine` and nothing else.
+- `Finalize`, `Finalizers`, `Initialize`, `Terminate` are no longer on the core interface — they move to opt-in interfaces (see below).
 - Uses `client.Object` directly instead of today's custom `RuntimeObject` type.
 
 #### Optional Subroutine Interfaces
 
-All lifecycle phases beyond `Process()` are opt-in. The lifecycle detects them via type-switch — same mechanism for all:
+All lifecycle phases are opt-in. The lifecycle detects them via type-switch — same mechanism for all:
 
 ```go
 // Finalizer is implemented by subroutines that need cleanup on deletion.
@@ -255,17 +263,25 @@ A subroutine composes the interfaces it needs:
 // Reconcile only — no cleanup on deletion
 type ConfigMapSubroutine struct{}
 var _ runtime.Subroutine = &ConfigMapSubroutine{}
+var _ runtime.Processor  = &ConfigMapSubroutine{}
 
 // Reconcile + cleanup on deletion
 type StoreSubroutine struct{}
 var _ runtime.Subroutine = &StoreSubroutine{}
-var _ runtime.Finalizer = &StoreSubroutine{}
+var _ runtime.Processor  = &StoreSubroutine{}
+var _ runtime.Finalizer  = &StoreSubroutine{}
 
 // Reconcile + cleanup + KCP initialization
 type WorkspaceSubroutine struct{}
-var _ runtime.Subroutine = &WorkspaceSubroutine{}
-var _ runtime.Finalizer = &WorkspaceSubroutine{}
-var _ runtime.Initializer = &WorkspaceSubroutine{}
+var _ runtime.Subroutine   = &WorkspaceSubroutine{}
+var _ runtime.Processor    = &WorkspaceSubroutine{}
+var _ runtime.Finalizer    = &WorkspaceSubroutine{}
+var _ runtime.Initializer  = &WorkspaceSubroutine{}
+
+// Cleanup only — no forward-processing needed
+type CleanupOnlySubroutine struct{}
+var _ runtime.Subroutine = &CleanupOnlySubroutine{}
+var _ runtime.Finalizer  = &CleanupOnlySubroutine{}
 ```
 
 The lifecycle is configured with the initializer/terminator name when KCP support is needed:
@@ -372,7 +388,10 @@ lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
 │     │       → skip (nothing to clean up)       │           │
 │     │     - Not deleting + Initializer impl?   │           │
 │     │       → Initialize()                     │           │
-│     │     - Otherwise → Process()              │           │
+│     │     - Not deleting + Processor impl?     │           │
+│     │       → Process()                        │           │
+│     │     - Otherwise → skip (no applicable    │           │
+│     │       phase interface)                   │           │
 │     │   - Update condition from result/error   │           │
 │     │   - If error: call ErrorReporter,        │           │
 │     │     track for requeue, continue           │           │
@@ -681,7 +700,7 @@ The lifecycle handles the full finalizer lifecycle for subroutines that implemen
 
 **What changes:**
 
-- `Finalize`/`Finalizers` move from core `Subroutine` interface to opt-in `Finalizer` interface — consistent with `Initializer`/`Terminator`
+- `Finalize`/`Finalizers` move from core `Subroutine` interface to opt-in `Finalizer` interface — consistent with `Processor`, `Initializer`, `Terminator`
 - Finalizer patch uses `client.MergeFrom` (same as today)
 
 ### Reconciliation Spreading (preserved, opt-in)
@@ -714,6 +733,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 | **Object fetching** | Lifecycle fetches via `client.Get` | Same — lifecycle fetches internally |
 | **Client resolution** | Lifecycle resolves from manager | Same — lifecycle resolves from manager |
 | **Condition reasons** | Generic (Processing/Complete/Error) | Specific (maps to result type) |
+| **Processing** | `Process` on core interface | Opt-in `Processor` interface |
 | **Finalization** | `Finalize`/`Finalizers` on core interface | Opt-in `Finalizer` interface |
 | **KCP init/terminate** | Built-in optional interfaces | Same pattern, returns `(Result, error)` |
 | **Sentry** | Built into reconcile loop, per-error `Sentry()` flag | No Sentry dependency; adopters bring their own `ErrorReporter` |
@@ -728,7 +748,7 @@ PR #160 adds `ChainSubroutine` as a parallel interface alongside the existing `S
 
 | Aspect | PR #160 | runtime v2 |
 |---|---|---|
-| **Subroutine types** | `Subroutine` + `ChainSubroutine` + `BaseSubroutine` | Single `Subroutine` |
+| **Subroutine types** | `Subroutine` + `ChainSubroutine` + `BaseSubroutine` | `Subroutine` (base) + opt-in `Processor`, `Finalizer`, `Initializer`, `Terminator` |
 | **Lifecycle types** | `Lifecycle` + `ChainLifecycle` + `LifecycleCore` | Single `Lifecycle` |
 | **Backward compat** | Maintains, via type-switch | None (clean break) |
 | **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 4 Result actions (OK, Pending, StopWithRequeue, Fail) + Go `error` for unexpected failures |
@@ -738,7 +758,7 @@ PR #160 adds `ChainSubroutine` as a parallel interface alongside the existing `S
 | **Condition manager** | `ConditionManager` | Single `ConditionManager` |
 | **Result construction** | Exported fields, multiple constructors | Unexported fields, constrained constructors |
 
-The fundamental issue with PR #160 is that it creates a parallel API surface to maintain backward compatibility. Since we're in a new repo, we don't need that. One interface, one result type, one processing loop.
+The fundamental issue with PR #160 is that it creates a parallel API surface to maintain backward compatibility. Since we're in a new repo, we don't need that. One base interface, opt-in phase interfaces, one result type, one processing loop.
 
 **Additional differences in Result design:**
 
@@ -756,7 +776,7 @@ The fundamental issue with PR #160 is that it creates a parallel API surface to 
 runtime/
 ├── lifecycle.go           // Lifecycle struct, Reconcile, builder
 ├── result.go              // Result type and constructors
-├── subroutine.go          // Subroutine, Finalizer, Initializer, Terminator interfaces
+├── subroutine.go          // Subroutine, Processor, Finalizer, Initializer, Terminator interfaces
 ├── context.go             // ClientFromContext, logger setup
 ├── errors.go              // ErrorReporter interface, ErrorInfo
 ├── conditions/
