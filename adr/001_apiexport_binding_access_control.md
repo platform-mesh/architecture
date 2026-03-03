@@ -6,7 +6,7 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.** APIExport should be bindable if it fulfills all requirenments (has apiresourceschema for now ) or platform-mesh administator has configured `APIExportPolicy` resource for that APIExport
+1. **APIExports are not bindable by default.** platform-mesh administator should configure `APIExportPolicy` resource for that APIExport to make it bindable
 2. Platform-mesh administrator configure `APIExportPolicy` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
 3. The security-operator reconciles `APIExportPolicy` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
@@ -70,12 +70,12 @@ spec:
 
   allowPathExpressions:
     # path which ends on workspace name without :* should grant access only for one specific account and his child accounts should have no binding permissions
-    - root:orgs:default:abc
-    - root:orgs:default:cde 
+    - :root:orgs:default:abc
+    - :root:orgs:default:cde 
     # root:orgs:* -- allows binding for every organization
-    - root:orgs:*
+    - :root:orgs:*
     # root:orgs:<org name>:* -- allows binding for all accounts within one organization
-    - root:orgs:demo:*
+    - :root:orgs:demo:*
 
 status:
   conditions:
@@ -83,10 +83,10 @@ status:
       status: "True"
   # to efectivelly remove tuples if expressions have changed
   managedAllowExpressions:
-    - root:orgs:default:abc
-    - root:orgs:default:cde 
-    - root:orgs:*
-    - root:orgs:demo:*
+    - :root:orgs:default:abc
+    - :root:orgs:default:cde 
+    - :root:orgs:*
+    - :root:orgs:demo:*
 ```
 
 The `APIExportPolicy` CR is created by platform-mesh administrator. The security operator reconciles the `APIExportPolicy` resource and creates required tuples.
@@ -103,7 +103,7 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
   allowPathExpressions:
-    - root:orgs:org1:accountA:accountB:accountC
+    - :root:orgs:org1:accountA:accountB:accountC
 ```
 
 The security-operator resolves the path expression to the referenced account and writes a single tuple using relation `bind`. This grants bind permission only to that specific account. Child accounts do **not** inherit it because inheritance is only implemented via `bind_inherited from parent`.
@@ -140,10 +140,10 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
   allowPathExpressions:
-    - root:orgs:org1:*
+    - :root:orgs:org1:*
 ```
 
-The security-operator resolves `root:orgs:org1:*` to the organization root account (org1) and writes a single tuple using relation `bind_inherited`. This allows all descendant accounts to bind via `bind_inherited from parent`.
+The security-operator resolves `:root:orgs:org1:*` to the organization root account (org1) and writes a single tuple using relation `bind_inherited`. This allows all descendant accounts to bind via `bind_inherited from parent`.
 
 **Stored tuple** (written into org1's FGA store):
 
@@ -168,10 +168,10 @@ spec:
     name: orchestrate.platform-mesh.io
     clusterName: provider-cluster-1
   allowPathExpressions:
-    - root:orgs:*
+    - :root:orgs:*
 ```
 
-The security-operator resolves `root:orgs:*` to all org root accounts and writes one `bind_inherited` tuple per org store.
+The security-operator resolves `:root:orgs:*` to all org root accounts and writes one `bind_inherited` tuple per org store.
 
 **Stored tuples** (1 tuple per org store):
 
@@ -204,7 +204,7 @@ user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 ### APIExportPolicy controller (security-operator)
 
 - Reconcile `APIExportPolicy` CRs by looking for the dedicated ApiExportEndpointSlice (e.g. security.platform-mesh.io).
-- For each `APIExportPolicy`, interprets `allowPathExpressions` and resolves each path (or wildcard like `root:orgs:*`, `root:orgs:demo:*`) to the set of workspaces.
+- For each `APIExportPolicy`, interprets `allowPathExpressions` and resolves each path (or wildcard like `:root:orgs:*`, `:root:orgs:demo:*`) to the set of workspaces.
 - For each resolved workspace, looks up AccountInfo / FGA store and writes one bind tuple 
 - When `allowPathExpressions` change or `APIExportPolicy` is deleted: removes stale tuples from FGA.
 
