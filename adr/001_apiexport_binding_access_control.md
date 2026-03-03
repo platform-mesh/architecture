@@ -58,7 +58,7 @@ E.g in this kcp structure:
 
 
 ```yaml
-apiVersion: security.platform-mesh.io/v1alpha1
+apiVersion: authorization.platform-mesh.io/v1alpha1
 kind: APIExportPolicy
 metadata:
   name: orchestrate-platform-mesh-io
@@ -198,8 +198,8 @@ user:     apis_kcp_io_apiexport:provider-cluster-1/orchestrate.platform-mesh.io
 
 ### platform-mesh operator
 - define ApiResourceSchema for `APIExportPolicy` resource
-- define ApiExport `security.platform-mesh.io` (naming may change in future) which references ApiResourceSchema for `APIExportPolicy` resource
-- define ApiBinding for `security.platform-mesh.io` ApiExport
+- define ApiExport `authorization.platform-mesh.io` (naming may change in future) which references ApiResourceSchema for `APIExportPolicy` resource
+- define ApiBinding for `authorization.platform-mesh.io` ApiExport
 
 ### APIExportPolicy controller (security-operator)
 
@@ -237,5 +237,7 @@ Check(
 | One org subtree (`allowPathExpressions`: `root:orgs:<org>:*`) | 1 | that org’s FGA store |
 | All orgs (`allowPathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
 
-## Open Considerations
+## Future Improvements/Considerations
 - **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
+- **Resource selector based filtering**: investigate how to allow binding of APIExports based on some attribute or label, the challenge here is reconciliation comlexity and tuples cleanup. If we have 10k workspaces in the system, we would need to check them all to check do they have a needed attribute.
+- **Huge partial access**: If the system has a huge amount of organiztion e.g 5000 orgs, and the admin wants to give bind permissions for 500 or more orgs it will become hard to maintain. 
