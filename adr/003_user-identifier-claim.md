@@ -11,7 +11,7 @@ decision-makers: Platform Mesh team
 Platform Mesh authenticates users via Keycloak-issued JWT tokens (potentially through a federated IdP). The token passes through multiple systems — each with its own constraints on which claims are available:
 
 1. **Keycloak** signs the JWT containing claims like `sub`, `email`, `preferred_username`, etc.
-2. **KCP / Kubernetes API Server** validates the JWT via OIDC integration and extracts a username based on the configured `--oidc-username-claim`.
+2. **KCP / Kubernetes API Server** validates the JWT via OIDC integration and extracts a username based on the `username.claim` configured in a `WorkspaceAuthenticationConfiguration` (KCP) / `StructuredAuthenticationConfiguration` (Kubernetes) resource.
 3. **rebac-authorization-webhook** receives a `SubjectAccessReview` from the API server for authorization decisions. At this point, only the extracted `user`, `groups`, `uid`, and `extra` fields are available — the original JWT claims are gone.
 4. **OpenFGA** stores relationship tuples that reference users by identifier. The authorization webhook must be able to correlate the user from the `SubjectAccessReview` with tuples stored in OpenFGA.
 
@@ -59,7 +59,7 @@ This is a deliberate trade-off: we accept that email addresses are visible to pl
 
 ### Confirmation
 
-* Verify that `--oidc-username-claim=email` is configured on all KCP API server instances.
+* Verify that `username.claim` is set to `email` in the `WorkspaceAuthenticationConfiguration` resources on all KCP workspaces.
 * Verify that OpenFGA tuples reference users by email.
 * Document a runbook for handling email changes and GDPR erasure requests covering OpenFGA tuples, Kubernetes RBAC bindings, and audit logs.
 
@@ -67,9 +67,9 @@ This is a deliberate trade-off: we accept that email addresses are visible to pl
 
 ### Option 1: Email (`email` claim)
 
-Use `email` as `--oidc-username-claim` in Kubernetes. The API server extracts the email from the JWT and passes it as the `user` field in `SubjectAccessReview`. OpenFGA tuples store `user:<email>`.
+Configure `username.claim: email` in the `WorkspaceAuthenticationConfiguration` / `StructuredAuthenticationConfiguration` resource. The API server extracts the email from the JWT and passes it as the `user` field in `SubjectAccessReview`. OpenFGA tuples store `user:<email>`.
 
-* Good, because Kubernetes has special support for the `email` claim — when configured, RBAC bindings can be created directly against the email address (e.g. `kubectl create clusterrolebinding ... --user=user@example.com`) without the `<issuer>#<claim>` prefix that other claims require ([Kubernetes OIDC docs](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens))
+* Good, because when `username.claim` is set to `email` in the authentication configuration, RBAC bindings can be created directly against the email address (e.g. `kubectl create clusterrolebinding ... --user=user@example.com`) without the `<issuer>#<claim>` prefix that other claims require ([Kubernetes OIDC docs](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens))
 * Good, because the authorization webhook receives the email as the `user` field in the `SubjectAccessReview` and can use it directly for OpenFGA checks — no mapping or lookup required ([Webhook Authorization docs](https://kubernetes.io/docs/reference/access-authn-authz/webhook/))
 * Good, because email addresses are human-readable, making debugging, auditing, and manual RBAC management straightforward
 * Neutral, because email is generally unique per user within an IdP realm, but uniqueness guarantees depend on Keycloak configuration
@@ -79,7 +79,7 @@ Use `email` as `--oidc-username-claim` in Kubernetes. The API server extracts th
 
 ### Option 2: Subject (`sub` claim / opaque UID)
 
-Use `sub` (or another opaque UID) as `--oidc-username-claim`. OpenFGA tuples store `user:<uuid>`.
+Configure `username.claim: sub` (or another opaque UID claim) in the `WorkspaceAuthenticationConfiguration` / `StructuredAuthenticationConfiguration` resource. OpenFGA tuples store `user:<uuid>`.
 
 * Good, because the `sub` claim is a stable identifier that never changes — it survives email changes, name changes, and domain migrations
 * Good, because it is pseudonymous — while still personal data under GDPR (it can be correlated back to a natural person via Keycloak), it does not directly reveal the user's identity to anyone inspecting the tuple store or audit logs
