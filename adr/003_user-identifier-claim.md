@@ -98,7 +98,7 @@ Use `sub` (or another opaque UID) as `--oidc-username-claim`. OpenFGA tuples sto
 
 The following mitigations should be implemented to address the drawbacks of using email:
 
-1. **GDPR erasure**: Implement a user deletion workflow that removes or anonymizes the email across all systems — OpenFGA tuples, Kubernetes RBAC bindings, audit logs, and any internal databases. This should be triggered when a user exercises their right to erasure under Art. 17 GDPR.
+1. **GDPR erasure**: Implement a user deletion workflow that removes or anonymizes user data across all systems — OpenFGA tuples, Kubernetes RBAC bindings, audit logs, and any internal databases. This is required regardless of which identifier is chosen (both email and `sub` are personal data under [Art. 4(1) GDPR](https://gdpr-info.eu/art-4-gdpr/)), but using email means the identifier itself must be scrubbed rather than just the mapping.
 
 2. **Email change handling**: Implement an email migration workflow that updates all references when a user's email changes in Keycloak. This includes OpenFGA tuples, Kubernetes RBAC bindings, and any cached identity information.
 
@@ -109,4 +109,5 @@ The following mitigations should be implemented to address the drawbacks of usin
 * [Kubernetes OIDC Authentication](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens)
 * [Kubernetes Webhook Authorization](https://kubernetes.io/docs/reference/access-authn-authz/webhook/)
 * [OpenFGA Tuples API Best Practices](https://openfga.dev/docs/getting-started/tuples-api-best-practices)
+* [Art. 4 GDPR — Definitions](https://gdpr-info.eu/art-4-gdpr/) (defines "personal data" and "pseudonymisation" in points 1 and 5)
 * [Art. 17 GDPR — Right to Erasure](https://gdpr-info.eu/art-17-gdpr/)
