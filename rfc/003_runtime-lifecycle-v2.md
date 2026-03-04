@@ -693,8 +693,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 |---|---|---|
 | **Runtime support** | controller-runtime + multicluster-runtime | multicluster-runtime only |
 | **Subroutine result** | `(ctrl.Result, OperatorError)` | `(Result, error)` — mirrors Go/controller-runtime convention |
-| **Flow control** | error = stop, no error = continue | `Result` for intent (OK/Pending/StopWithRequeue/Stop), `error` for unexpected failures — both stop the chain |
-| **Error semantics** | `error` return stops chain + requeues | `error` stops chain + requeues (same); richer Result vocabulary for non-error flow control |
+| **Flow control** | error = stop, no error = continue | Same error semantics; richer `Result` vocabulary adds `Pending` (continue despite not-ready) and `StopWithRequeue` (intentional halt with message) |
 | **Error type** | `OperatorError` custom interface | Standard Go `error`; flow control via `Result`, not error type |
 | **Error reporting** | Sentry baked into reconcile loop | `ErrorReporter` interface only; no implementation shipped |
 | **Object fetching** | Lifecycle fetches via `client.Get` | Same — lifecycle fetches internally |
@@ -719,8 +718,8 @@ PR #160 adds `ChainSubroutine` as a parallel interface alongside the existing `S
 | **Lifecycle types** | `Lifecycle` + `ChainLifecycle` + `LifecycleCore` | Single `Lifecycle` |
 | **Backward compat** | Maintains, via type-switch | None (clean break) |
 | **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 4 Result actions (OK, Pending, StopWithRequeue, Stop) + Go `error` for unexpected failures |
-| **Error propagation** | First error stops chain + returns immediately | Error stops chain; status patched before returning error to CR |
-| **Error behavior** | ErrorContinue/ErrorStop split | Errors stop the chain; `Pending()` handles the "continue despite not-ready" case |
+| **Error propagation** | First error stops chain + returns immediately | Same — error stops chain; status patched before returning error to CR |
+| **Error behavior** | ErrorContinue/ErrorStop split | No split needed — errors always stop; `Pending()` covers the "not-ready but continue" case without overloading error semantics |
 | **Skipped** | Explicit outcome | Not needed — return `OK()` |
 | **Condition manager** | `ConditionManager` | Single `ConditionManager` |
 | **Result construction** | Exported fields, multiple constructors | Unexported fields, constrained constructors |
