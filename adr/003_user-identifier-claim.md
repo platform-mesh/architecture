@@ -101,7 +101,7 @@ Configure `username.claim: sub` (or another opaque UID claim) in the `WorkspaceA
 * Good, because it partially aligns with OpenFGA best practices ("do not store PII in tuples") — though strictly speaking, a `sub` that maps to a Keycloak user is still personal data, it is not *directly identifiable* PII like an email address
 * Good, because it decouples identity from any mutable user attribute
 * Bad, because Kubernetes requires the `<issuer-url>#<claim-value>` prefix format for non-email/non-username claims — the user field in RBAC bindings becomes something like `https://portal.localhost:8443/keycloak/realms/welcome#dec76aa7-7bd0-40f8-93e4-65ac473dbc5e`, which is unwieldy for manual operations
-* Bad, because the authorization webhook receives this prefixed string as the `user` in `SubjectAccessReview` — the webhook and OpenFGA must either store tuples using the full prefixed form or strip the prefix, both of which add complexity
+* Bad, because the authorization webhook receives the prefixed `<issuer>#<sub>` string as the `user` in `SubjectAccessReview`, and this value cannot be used directly as an OpenFGA user identifier — the `#` and `://` characters in the issuer URL are invalid in OpenFGA object identifiers, so the webhook must strip the prefix before querying tuples, adding parsing logic and a tight coupling to the issuer URL format
 * Bad, because UUIDs are opaque — debugging authorization issues requires a lookup from UUID to human-readable identity, increasing operational overhead
 * Bad, because any tooling or UI that displays permissions must resolve UUIDs back to user-readable names, requiring an additional user info service or Keycloak lookup
 
