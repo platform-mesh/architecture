@@ -14,7 +14,7 @@ The `golang-commons/controller/lifecycle` package has served us well, but has ac
 4. **Implicit behavior** — Finalizer management, condition setting, spread scheduling, and status patching are all woven into a single 300+ line `Reconcile` function with complex branching.
 5. **Limited observability** — No per-subroutine timing, no structured outcome logging, and condition reasons are too generic ("Processing", "Error").
 
-The `runtime` package is a clean-room rewrite. It targets **multicluster-runtime only** and makes no attempt to be backward-compatible with the existing lifecycle package.
+The `github.com/platform-mesh/subroutines` module is a clean-room rewrite. It targets **multicluster-runtime only** and makes no attempt to be backward-compatible with the existing lifecycle package.
 
 ## Scope
 
@@ -40,7 +40,7 @@ The `runtime` package is a clean-room rewrite. It targets **multicluster-runtime
 4. **Results carry intent, errors are unexpected** — `Result` communicates the subroutine's intent: continue, stop, requeue timing. The Go `error` return signals unexpected failures (API timeouts, network issues). These are two separate concerns: `Result` drives the business outcome, `error` signals something went wrong. After all subroutines run and status is updated, collected errors are returned to controller-runtime so its rate limiter handles backoff.
 5. **Standard `error`, no custom error interface** — The current lifecycle uses `OperatorError` (a custom interface with `Err() error`, `Retry() bool`, `Sentry() bool`) to bundle flow control and reporting hints into the error itself. This is unnecessary when `Result` carries flow control and `ErrorReporter` handles reporting. Runtime v2 uses plain `error` everywhere. Standard Go errors, `fmt.Errorf` wrapping, `errors.Is`/`errors.As` — nothing custom.
 6. **Errors don't stop the chain** — Unexpected errors (Go `error` return) do not halt processing. The lifecycle continues to run all subroutines so that conditions reflect the full state. Only `StopWithRequeue` and `Stop` (explicit `Result` values) halt the chain — these are intentional decisions, not side effects of failure.
-7. **Subroutines don't persist directly** — Subroutines mutate the in-memory object (e.g., setting status fields, adding labels), but never call `client.Status().Update()` or `client.Update()` on the reconciled object. The lifecycle detects diffs and patches once after all subroutines have run — status and metadata always, spec only when opted in via `WithSpecPatch()`. This prevents partial writes, conflicting updates, and ensures patches reflect the complete reconciliation outcome. The cluster-scoped client is available via context (`runtime.ClientFromContext(ctx)`) for looking up other resources.
+7. **Subroutines don't persist directly** — Subroutines mutate the in-memory object (e.g., setting status fields, adding labels), but never call `client.Status().Update()` or `client.Update()` on the reconciled object. The lifecycle detects diffs and patches once after all subroutines have run — status and metadata always, spec only when opted in via `WithSpecPatch()`. This prevents partial writes, conflicting updates, and ensures patches reflect the complete reconciliation outcome. The cluster-scoped client is available via context (`subroutines.ClientFromContext(ctx)`) for looking up other resources.
 
 ---
 
@@ -244,32 +244,32 @@ A subroutine composes the interfaces it needs:
 ```go
 // Reconcile only — no cleanup on deletion
 type ConfigMapSubroutine struct{}
-var _ runtime.Subroutine = &ConfigMapSubroutine{}
-var _ runtime.Processor  = &ConfigMapSubroutine{}
+var _ subroutines.Subroutine = &ConfigMapSubroutine{}
+var _ subroutines.Processor  = &ConfigMapSubroutine{}
 
 // Reconcile + cleanup on deletion
 type StoreSubroutine struct{}
-var _ runtime.Subroutine = &StoreSubroutine{}
-var _ runtime.Processor  = &StoreSubroutine{}
-var _ runtime.Finalizer  = &StoreSubroutine{}
+var _ subroutines.Subroutine = &StoreSubroutine{}
+var _ subroutines.Processor  = &StoreSubroutine{}
+var _ subroutines.Finalizer  = &StoreSubroutine{}
 
 // Reconcile + cleanup + KCP initialization
 type WorkspaceSubroutine struct{}
-var _ runtime.Subroutine   = &WorkspaceSubroutine{}
-var _ runtime.Processor    = &WorkspaceSubroutine{}
-var _ runtime.Finalizer    = &WorkspaceSubroutine{}
-var _ runtime.Initializer  = &WorkspaceSubroutine{}
+var _ subroutines.Subroutine   = &WorkspaceSubroutine{}
+var _ subroutines.Processor    = &WorkspaceSubroutine{}
+var _ subroutines.Finalizer    = &WorkspaceSubroutine{}
+var _ subroutines.Initializer  = &WorkspaceSubroutine{}
 
 // Cleanup only — no forward-processing needed
 type CleanupOnlySubroutine struct{}
-var _ runtime.Subroutine = &CleanupOnlySubroutine{}
-var _ runtime.Finalizer  = &CleanupOnlySubroutine{}
+var _ subroutines.Subroutine = &CleanupOnlySubroutine{}
+var _ subroutines.Finalizer  = &CleanupOnlySubroutine{}
 ```
 
 The lifecycle is configured with the initializer/terminator name when KCP support is needed:
 
 ```go
-lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, sub1, sub2, sub3).
     WithInitializer("my-initializer").
     WithTerminator("my-terminator")
 ```
@@ -292,8 +292,10 @@ lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
 The lifecycle reconciler is the core orchestration engine. It is **not** a full `reconcile.Reconciler` — it's a function you call from your reconciler:
 
 ```go
+package lifecycle
+
 type Lifecycle struct {
-    subroutines []Subroutine
+    subroutines []subroutines.Subroutine
     options     Options
 }
 
@@ -316,7 +318,7 @@ func (l *Lifecycle) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.
 The lifecycle is constructed with the manager, so it can resolve the cluster-scoped client internally:
 
 ```go
-lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, sub1, sub2, sub3).
     WithConditions().
     WithSpread()
 ```
@@ -441,7 +443,7 @@ No custom type. Subroutines operate on `client.Object` directly — the standard
 ### Builder API
 
 ```go
-lifecycle := runtime.NewLifecycle(mgr,
+lc := lifecycle.New(mgr,
     subroutine1,
     subroutine2,
     subroutine3,
@@ -457,10 +459,10 @@ The builder is on the `Lifecycle` struct itself — no separate `Builder` type.
 
 In `golang-commons`, Sentry is deeply embedded: every `OperatorError` carries a `Sentry() bool` flag, the reconciliation loop checks it inline, and subroutines must decide at return time whether their error "deserves" Sentry. PR #160 propagates this via a `Sentry bool` field on `Result`. Both approaches couple subroutine business logic to a specific error reporting backend.
 
-In runtime v2, **subroutines know nothing about error reporting**. The `Result` type has no Sentry field, no reporting flags. Instead, the package defines an `ErrorReporter` interface that adopters implement to integrate their error reporting backend of choice (Sentry, OpenTelemetry, plain logging, etc.):
+In runtime v2, **subroutines know nothing about error reporting**. The `Result` type has no Sentry field, no reporting flags. Instead, the `lifecycle` package defines an `ErrorReporter` interface that adopters implement to integrate their error reporting backend of choice (Sentry, OpenTelemetry, plain logging, etc.):
 
 ```go
-lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, sub1, sub2, sub3).
     WithErrorReporter(reporter)
 ```
 
@@ -471,7 +473,7 @@ The `ErrorReporter` interface:
 // It is called only when a subroutine returns a non-nil error — NOT for Stop(),
 // which represents a known business condition, not an unexpected error.
 //
-// The runtime package provides this interface only — no implementations are shipped.
+// The lifecycle package provides this interface only — no implementations are shipped.
 // Adopters register their own implementation (e.g., Sentry, OTel, structured logging).
 type ErrorReporter interface {
     Report(ctx context.Context, err error, info ErrorInfo)
@@ -495,7 +497,7 @@ type SentryReporter struct {
     hub *sentry.Hub
 }
 
-func (r *SentryReporter) Report(ctx context.Context, err error, info runtime.ErrorInfo) {
+func (r *SentryReporter) Report(ctx context.Context, err error, info lifecycle.ErrorInfo) {
     // Skip transient errors that resolve on retry
     if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
         return
@@ -511,7 +513,7 @@ func (r *SentryReporter) Report(ctx context.Context, err error, info runtime.Err
 }
 
 // Register one or more reporters — each WithErrorReporter call appends
-lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, sub1, sub2, sub3).
     WithErrorReporter(&SentryReporter{hub: sentry.CurrentHub()}).
     WithErrorReporter(&SlackAlerter{webhook: slackURL})
 ```
@@ -533,7 +535,7 @@ Rate limiting operates at two complementary levels:
 **Controller-level** — A coarse safety net on the work queue. The lifecycle supports configuring a rate limiter that controls how fast items re-enter the queue:
 
 ```go
-lifecycle := runtime.NewLifecycle(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, sub1, sub2, sub3).
     WithRateLimiter(workqueue.DefaultTypedItemBasedRateLimiter[reconcile.Request]())
 ```
 
@@ -734,23 +736,37 @@ The fundamental issue with PR #160 is that it creates a parallel API surface to 
 
 ---
 
-## Package Structure
+## Module and Package Structure
+
+**Module:** `github.com/platform-mesh/subroutines`
 
 ```
-runtime/
-├── lifecycle.go           // Lifecycle struct, Reconcile, builder
-├── result.go              // Result type and constructors
-├── subroutine.go          // Subroutine, Processor, Finalizer, Initializer, Terminator interfaces
-├── context.go             // ClientFromContext, logger setup
-├── errors.go              // ErrorReporter interface, ErrorInfo
-├── conditions/
-│   ├── manager.go         // ConditionManager implementation
-│   └── accessor.go        // ConditionAccessor interface
-├── spread/
-│   ├── manager.go         // SpreadManager implementation
-│   └── status.go          // SpreadReconcileStatus interface
-└── metrics/
-    └── metrics.go         // Prometheus metric registration
+subroutines/                         # package subroutines — what subroutine authors import
+├── subroutine.go                    //   Subroutine, Processor, Finalizer, Initializer, Terminator interfaces
+├── result.go                        //   Result type and factory functions (OK, Pending, StopWithRequeue, ...)
+├── context.go                       //   ClientFromContext, logger enrichment utilities
+├── lifecycle/                       # package lifecycle — what controller setup code imports
+│   ├── lifecycle.go                 //   Lifecycle struct, Reconcile method, builder API (New, With*)
+│   ├── errors.go                    //   ErrorReporter interface, ErrorInfo
+│   └── options.go                   //   Options, PrepareContext, ReadOnly, WithSpecPatch
+├── conditions/                      # package conditions — opt-in condition management
+│   ├── manager.go                   //   ConditionManager implementation
+│   └── accessor.go                  //   ConditionAccessor interface
+├── spread/                          # package spread — opt-in reconciliation spreading
+│   ├── manager.go                   //   SpreadManager implementation
+│   └── status.go                    //   SpreadReconcileStatus interface
+└── metrics/                         # package metrics — Prometheus metric registration
+    └── metrics.go
 ```
 
-The core package (`runtime/`) contains the lifecycle, result type, and subroutine interfaces — the API surface every user touches. Opt-in features with their own interfaces and implementation logic get sub-packages. Users configure everything through the builder on `Lifecycle`; sub-package imports are only needed when implementing feature interfaces (e.g., `conditions.ConditionAccessor` on a CRD type).
+**Import ergonomics:**
+
+```go
+import (
+    "github.com/platform-mesh/subroutines"            // subroutines.Processor, subroutines.OK(), subroutines.Result
+    "github.com/platform-mesh/subroutines/lifecycle"   // lifecycle.New(mgr, sub1, sub2)
+    "github.com/platform-mesh/subroutines/conditions"  // conditions.ConditionAccessor (on CRD types)
+)
+```
+
+The root package (`subroutines`) contains the interfaces and types that subroutine authors use daily — this is the primary API surface. The `lifecycle` subpackage contains the orchestration engine that controller setup code imports once. Opt-in features (`conditions`, `spread`, `metrics`) are sub-packages imported only when needed.
