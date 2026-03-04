@@ -45,7 +45,7 @@ A typical JWT issued by Keycloak looks like this:
 
 ## Decision Outcome
 
-Chosen option: **"Email (`email` claim)"**, because it is the only option that provides a seamless end-to-end correlation from Kubernetes OIDC through the authorization webhook to OpenFGA — without requiring infrastructure changes to the Kubernetes API server's authorization webhook contract.
+Chosen option: **"Email (`email` claim)"**, because it is the only option that provides a seamless end-to-end correlation from Kubernetes OIDC through the authorization webhook to OpenFGA.
 
 This is a deliberate trade-off: we accept that email addresses are visible to platform administrators with direct access to OpenFGA or Kubernetes audit logs, and that email changes require tuple migration, in exchange for a significantly simpler integration with the Kubernetes ecosystem.
 
