@@ -119,6 +119,10 @@ The following mitigations should be implemented to address the drawbacks of usin
 
 3. **Tuple store access control**: Restrict access to the OpenFGA tuple store to minimize exposure of email addresses embedded in tuples.
 
+### Open Questions
+
+1. **Automatic propagation of IdP identity changes**: When a federated IdP is the source of truth for user identities, email changes originate outside of Platform Mesh. How can we detect and automatically propagate such changes (e.g. via Keycloak event listeners, SCIM, or webhook callbacks) to update OpenFGA tuples, Kubernetes RBAC bindings, and other downstream references?
+
 ### References
 
 * [Kubernetes OIDC Authentication](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens)
