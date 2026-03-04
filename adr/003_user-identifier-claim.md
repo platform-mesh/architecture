@@ -69,7 +69,22 @@ This is a deliberate trade-off: we accept that email addresses are visible to pl
 
 Configure `username.claim: email` in the `WorkspaceAuthenticationConfiguration` / `StructuredAuthenticationConfiguration` resource. The API server extracts the email from the JWT and passes it as the `user` field in `SubjectAccessReview`. OpenFGA tuples store `user:<email>`.
 
-* Good, because when `username.claim` is set to `email` in the authentication configuration, RBAC bindings can be created directly against the email address (e.g. `kubectl create clusterrolebinding ... --user=user@example.com`) without the `<issuer>#<claim>` prefix that other claims require ([Kubernetes OIDC docs](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens))
+* Good, because when `username.claim` is set to `email` in the authentication configuration, RBAC bindings can be created directly against the email address without the `<issuer>#<claim>` prefix that other claims require ([Kubernetes OIDC docs](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens)):
+
+  ```bash
+  # With email claim — clean, portable, human-readable:
+  kubectl create clusterrolebinding alice-admin \
+    --clusterrole=admin \
+    --user=alice@example.com
+
+  # With sub claim — prefixed with the full issuer URL:
+  kubectl create clusterrolebinding alice-admin \
+    --clusterrole=admin \
+    --user=https://idp.example.com/realms/my-realm#a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  ```
+
+  The email form is easier to read in audit logs and scripts, and survives IdP migrations (changing the issuer URL would break all `sub`-based bindings).
+
 * Good, because the authorization webhook receives the email as the `user` field in the `SubjectAccessReview` and can use it directly for OpenFGA checks — no mapping or lookup required ([Webhook Authorization docs](https://kubernetes.io/docs/reference/access-authn-authz/webhook/))
 * Good, because email addresses are human-readable, making debugging, auditing, and manual RBAC management straightforward
 * Neutral, because email is generally unique per user within an IdP realm, but uniqueness guarantees depend on Keycloak configuration
