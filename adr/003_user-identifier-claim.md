@@ -109,6 +109,10 @@ Configure `username.claim: sub` (or another opaque UID claim) in the `WorkspaceA
 
 ## More Information
 
+### Assumptions
+
+1. **Single user account per email across IdPs**: Platform Mesh supports multiple federated identity providers (IdPs) connected to a Keycloak realm. However, this decision assumes that Keycloak is configured to link identities from different IdPs to a single user account when they share the same email address (e.g. via the "First Broker Login" flow with automatic or user-prompted account linking). If two different IdP users with the same email were to exist as separate Keycloak accounts, they would be indistinguishable at the authorization layer — resulting in unintended permission sharing. Keycloak must also enforce `email_verified: true` for all federated identity flows to prevent identity impersonation through unverified email claims.
+
 ### Mitigations for Known Risks
 
 The following mitigations should be implemented to address the drawbacks of using email:
@@ -117,7 +121,7 @@ The following mitigations should be implemented to address the drawbacks of usin
 
 2. **Email change handling**: Implement an email migration workflow that updates all references when a user's email changes in Keycloak. This includes OpenFGA tuples, Kubernetes RBAC bindings, and any cached identity information.
 
-3. **Tuple store access control**: Restrict access to the OpenFGA tuple store to minimize exposure of email addresses embedded in tuples.
+3. **Tuple store access control**: Using email in OpenFGA adds one additional application-layer surface where user identities are directly visible. Since the underlying infrastructure (etcd for Kubernetes, PostgreSQL for OpenFGA and Keycloak) shares the same protection boundary, the incremental data security risk is limited to OpenFGA's application-level access controls and API surface — a breach at the infrastructure level would expose emails from Keycloak's user database regardless of what OpenFGA stores. This risk is mitigated by restricting OpenFGA API access to the authorization webhook and administrative tooling.
 
 ### Open Questions
 
