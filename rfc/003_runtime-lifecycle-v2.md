@@ -55,6 +55,7 @@ type Result struct {
     action  action         // what the lifecycle should do next (zero value = continue)
     requeue time.Duration  // when to reconcile again (zero = don't requeue from this subroutine)
     message string         // human-readable explanation (for conditions/logging)
+    ready   bool           // for SkipAll: whether the aggregate Ready condition should be True
 }
 ```
 
@@ -71,7 +72,7 @@ Terminate(ctx context.Context, instance client.Object) (Result, error)  // Termi
 
 When `error` is non-nil, the lifecycle logs the error, sets the subroutine's condition to False, calls the `ErrorReporter`, and **stops the chain** — matching standard Go and controller-runtime convention. The error is returned to controller-runtime so its rate limiter handles backoff. When `error` is non-nil, the `Result` is ignored.
 
-Both `error` returns and explicit `StopWithRequeue()`/`Stop()` results halt the chain. The difference: `error` signals an unexpected failure (and triggers the `ErrorReporter`), while `StopWithRequeue`/`Stop` are intentional decisions. For subroutines that are "not ready" but don't need to block others, use `Pending()` — this continues the chain because it represents a known state, not a failure.
+Both `error` returns and explicit `StopWithRequeue()`/`Stop()`/`SkipAll()` results halt the chain. The difference: `error` signals an unexpected failure (and triggers the `ErrorReporter`), while `StopWithRequeue`/`Stop`/`SkipAll` are intentional decisions. `SkipAll` additionally sets remaining subroutines' conditions to `Skipped` and lets the caller control the aggregate Ready condition via the `ready` flag. For subroutines that are "not ready" but don't need to block others, use `Pending()` — this continues the chain because it represents a known state, not a failure.
 
 Fields are unexported. Construction happens through factory functions, which makes illegal states unrepresentable. For the common case, the **zero value is meaningful**:
 
@@ -100,6 +101,9 @@ StopWithRequeue(d, message)       // halt chain, requeue after duration (transie
 
 // Halt chain, no explicit requeue — return (Result, nil)
 Stop(message)                     // halt chain, rely on default resync for next reconcile
+
+// Halt chain, skip remaining subroutines — return (Result, nil)
+SkipAll(ready, message)           // halt chain, mark remaining subs as Skipped; ready controls aggregate Ready condition
 ```
 
 Examples:
@@ -158,31 +162,56 @@ func (s *MySubroutine) Process(ctx context.Context, instance client.Object) (Res
     }
     return Result{}, nil
 }
+
+// Early completion — skip remaining subroutines, resource is Ready
+// → Subroutine condition: True/Complete ("resource already in desired state")
+// → Remaining subroutine conditions: True/Skipped
+// → Ready condition: True (ready=true)
+func (s *PreflightSubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
+    if s.isAlreadyUpToDate(ctx, instance) {
+        return SkipAll(true, "resource already in desired state"), nil
+    }
+    return Result{}, nil
+}
+
+// Early exit — skip remaining subroutines, resource is NOT Ready
+// → Subroutine condition: False/Stopped ("disabled by feature flag")
+// → Remaining subroutine conditions: False/Skipped
+// → Ready condition: False (ready=false)
+func (s *FeatureGateSubroutine) Process(ctx context.Context, instance client.Object) (Result, error) {
+    if !s.isEnabled(ctx) {
+        return SkipAll(false, "disabled by feature flag"), nil
+    }
+    return Result{}, nil
+}
 ```
 
-`StopWithRequeue`, `Stop`, and `error` returns all halt the chain. For subroutines that need to express "not ready, but let others continue," use `Pending()` — this is a known state (not a failure) and the chain continues.
+`StopWithRequeue`, `Stop`, `SkipAll`, and `error` returns all halt the chain. For subroutines that need to express "not ready, but let others continue," use `Pending()` — this is a known state (not a failure) and the chain continues. `SkipAll` differs from `Stop` in that remaining subroutines' conditions are set to `Skipped` instead of being left stale, and the `ready` flag controls whether the aggregate Ready condition is True or False.
 
 After the subroutine chain completes (either all subroutines ran or the chain was halted), conditions are updated and status is patched. If a subroutine returned an error, the lifecycle **returns it to controller-runtime**. This lets controller-runtime's built-in rate limiter handle exponential backoff and ensures errors are visible in controller-runtime's own metrics and logging.
 
 ### Flow Control Summary
 
-| Return | Continue? | Requeue? | ErrorReporter? | Condition |
-|---|---|---|---|---|
-| `Result{}, nil` / `OK(), nil` | yes | no | no | True |
-| `OKWithRequeue(d), nil` | yes | after `d` | no | True |
-| `Pending(d, message), nil` | yes | after `d` | no | **Unknown** |
-| `StopWithRequeue(d, message), nil` | **no** | after `d` | no | **False** |
-| `Stop(message), nil` | **no** | default resync | no | **False** |
-| `Result{}, err` | **no** | CR rate limiter | **yes** | **False** |
+| Return | Continue? | Requeue? | ErrorReporter? | Condition | Remaining subs |
+|---|---|---|---|---|---|
+| `Result{}, nil` / `OK(), nil` | yes | no | no | True | run |
+| `OKWithRequeue(d), nil` | yes | after `d` | no | True | run |
+| `Pending(d, message), nil` | yes | after `d` | no | **Unknown** | run |
+| `StopWithRequeue(d, message), nil` | **no** | after `d` | no | **False** | unchanged |
+| `Stop(message), nil` | **no** | default resync | no | **False** | unchanged |
+| `SkipAll(true, message), nil` | **no** | no | no | **True** | **Skipped** |
+| `SkipAll(false, message), nil` | **no** | no | no | **False** | **Skipped** |
+| `Result{}, err` | **no** | CR rate limiter | **yes** | **False** | unchanged |
 
 **Key distinction:**
 - `error` = unexpected failure → chain stops, ErrorReporter called, CR rate limiter handles backoff
 - `StopWithRequeue` / `Stop` = intentional halt → chain stops, no ErrorReporter (this is a known business condition)
+- `SkipAll` = intentional early completion → chain stops, remaining subroutine conditions set to `Skipped`, aggregate Ready controlled by `ready` flag
 - `Pending` = known not-ready state → chain **continues**, subroutine signals it needs more time but doesn't block others
 
 This matches Go convention (`if err != nil { return }`) and controller-runtime behavior where a non-nil error stops the reconciliation. Subroutines that are independent of each other use `Pending()` to express "not ready yet" without halting the chain.
 
-**Error reporting** — `ErrorReporter` is called when a subroutine returns a non-nil `error`. Known business conditions (`StopWithRequeue`, `Stop`, `Pending`) are not reported — they are intentional decisions, not unexpected failures.
+**Error reporting** — `ErrorReporter` is called when a subroutine returns a non-nil `error`. Known business conditions (`StopWithRequeue`, `Stop`, `SkipAll`, `Pending`) are not reported — they are intentional decisions, not unexpected failures.
 
 **Error propagation** — When a subroutine returns an error, the lifecycle updates conditions, patches status, and returns the error to controller-runtime. This lets controller-runtime's rate limiter handle exponential backoff. Infrastructure failures (status patch, finalizer patch) are joined into the same return error via `errors.Join`.
 
@@ -196,8 +225,10 @@ type Subroutine interface {
 
 // Processor is implemented by subroutines that perform forward-processing (reconciliation).
 // The lifecycle calls Process() for non-deleting reconciliations when no Initializer applies.
+// Embeds Subroutine — any Processor automatically satisfies the base interface.
 type Processor interface {
-    Process(ctx context.Context, instance client.Object) (Result, error)
+    Subroutine
+    Process(ctx context.Context, obj client.Object) (Result, error)
 }
 ```
 
@@ -220,58 +251,60 @@ All lifecycle phases are opt-in. The lifecycle detects them via type-switch — 
 // Finalizer is implemented by subroutines that need cleanup on deletion.
 // Subroutines implementing this interface have Finalize() called during deletion
 // (in reverse order), and their declared finalizers are automatically managed.
+// Embeds Subroutine — any Finalizer automatically satisfies the base interface.
 type Finalizer interface {
-    Finalize(ctx context.Context, instance client.Object) (Result, error)
-    Finalizers(instance client.Object) []string
+    Subroutine
+    Finalize(ctx context.Context, obj client.Object) (Result, error)
+    Finalizers(obj client.Object) []string
 }
 
 // Initializer is implemented by subroutines that participate in KCP workspace initialization.
 // When the lifecycle is configured with an initializer name, subroutines implementing this
 // interface have Initialize() called instead of Process() during the initialization phase.
+// Embeds Subroutine — any Initializer automatically satisfies the base interface.
 type Initializer interface {
-    Initialize(ctx context.Context, instance client.Object) (Result, error)
+    Subroutine
+    Initialize(ctx context.Context, obj client.Object) (Result, error)
 }
 
 // Terminator is implemented by subroutines that participate in KCP workspace termination.
 // When the lifecycle is configured with a terminator name and the object is being deleted,
 // subroutines implementing this interface have Terminate() called. This covers KCP workspace
 // deletion where objects are removed without honoring finalizers.
+// Embeds Subroutine — any Terminator automatically satisfies the base interface.
 type Terminator interface {
-    Terminate(ctx context.Context, instance client.Object) (Result, error)
+    Subroutine
+    Terminate(ctx context.Context, obj client.Object) (Result, error)
 }
 ```
 
-A subroutine composes the interfaces it needs:
+A subroutine composes the interfaces it needs. Since each phase interface embeds `Subroutine`, a single `var _` assertion suffices:
 
 ```go
 // Reconcile only — no cleanup on deletion
 type ConfigMapSubroutine struct{}
-var _ subroutines.Subroutine = &ConfigMapSubroutine{}
-var _ subroutines.Processor  = &ConfigMapSubroutine{}
+var _ subroutines.Processor = &ConfigMapSubroutine{}
 
 // Reconcile + cleanup on deletion
 type StoreSubroutine struct{}
-var _ subroutines.Subroutine = &StoreSubroutine{}
-var _ subroutines.Processor  = &StoreSubroutine{}
-var _ subroutines.Finalizer  = &StoreSubroutine{}
+var _ subroutines.Processor = &StoreSubroutine{}
+var _ subroutines.Finalizer = &StoreSubroutine{}
 
 // Reconcile + cleanup + KCP initialization
 type WorkspaceSubroutine struct{}
-var _ subroutines.Subroutine   = &WorkspaceSubroutine{}
 var _ subroutines.Processor    = &WorkspaceSubroutine{}
 var _ subroutines.Finalizer    = &WorkspaceSubroutine{}
 var _ subroutines.Initializer  = &WorkspaceSubroutine{}
 
 // Cleanup only — no forward-processing needed
 type CleanupOnlySubroutine struct{}
-var _ subroutines.Subroutine = &CleanupOnlySubroutine{}
-var _ subroutines.Finalizer  = &CleanupOnlySubroutine{}
+var _ subroutines.Finalizer = &CleanupOnlySubroutine{}
 ```
 
 The lifecycle is configured with the initializer/terminator name when KCP support is needed:
 
 ```go
-lc := lifecycle.New(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, "MyController", newObj, sub1, sub2, sub3).
     WithInitializer("my-initializer").
     WithTerminator("my-terminator")
 ```
@@ -279,8 +312,8 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 **How it works:**
 
 - **Finalizer**: On first reconcile, the lifecycle adds finalizers from all subroutines that implement `Finalizer`. On deletion, `Finalize()` is called in reverse order; finalizers are removed after successful finalization. Subroutines that don't implement `Finalizer` are skipped during deletion.
-- **Initializer**: When configured and the object is not being deleted, subroutines implementing `Initializer` have `Initialize()` called instead of `Process()`. On successful reconciliation (no requeue), the lifecycle removes the initializer name from the object's status.
-- **Terminator**: When configured and the object is being deleted, subroutines implementing `Terminator` have `Terminate()` called. In KCP, workspace deletion removes objects without honoring finalizers — `Terminate()` gives subroutines a chance to clean up in that scenario. On successful reconciliation, the lifecycle removes the terminator from the object's status.
+- **Initializer**: When configured and the object is not being deleted, subroutines implementing `Initializer` have `Initialize()` called instead of `Process()`. The lifecycle removes the initializer name from the object's status only when all subroutines complete successfully — no error, no stop, no pending, no requeue.
+- **Terminator**: When configured and the object is being deleted, subroutines implementing `Terminator` have `Terminate()` called. In KCP, workspace deletion removes objects without honoring finalizers — `Terminate()` gives subroutines a chance to clean up in that scenario. The terminator is removed from status under the same conditions as the initializer.
 
 **Changes from current:**
 
@@ -291,38 +324,40 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 
 ### Lifecycle Reconciler
 
-The lifecycle reconciler is the core orchestration engine. It is **not** a full `reconcile.Reconciler` — it's a function you call from your reconciler:
+The lifecycle reconciler is the core orchestration engine. It implements `mcreconcile.Reconciler` — the multicluster-runtime reconciler interface:
 
 ```go
 package lifecycle
 
 type Lifecycle struct {
-    subroutines []subroutines.Subroutine
-    options     Options
+    mgr            mcmanager.Manager
+    controllerName string
+    newObj         func() client.Object
+    subroutines    []subroutines.Subroutine
+
+    conditions     ConditionManager
+    spread         SpreadManager
+    errorReporters []ErrorReporter
+    prepareCtx     func(ctx context.Context, obj client.Object) (context.Context, error)
+    readOnly       bool
+    specPatch      bool
+    initializer    string
+    terminator     string
 }
 
-type Options struct {
-    // Condition management (nil = disabled)
-    Conditions ConditionManager
-    // Spread scheduling (nil = disabled)
-    Spread SpreadManager
-    // ReadOnly mode — don't patch status or finalizers
-    ReadOnly bool
-    // Hook called before subroutines run, for context enrichment
-    PrepareContext func(ctx context.Context, instance client.Object) (context.Context, error)
-}
-
-// Reconcile fetches the object, runs the subroutine chain, and patches status.
-// Standard controller-runtime reconciler signature — the lifecycle handles everything.
-func (l *Lifecycle) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error)
+// Reconcile implements mcreconcile.Reconciler.
+// Fetches the object, runs the subroutine chain, and patches status.
+func (l *Lifecycle) Reconcile(ctx context.Context, req mcreconcile.Request) (reconcile.Result, error)
 ```
 
-The lifecycle is constructed with the manager, so it can resolve the cluster-scoped client internally:
+The lifecycle is constructed with the manager, a controller name (used for logging, tracing, and metrics), and an object factory:
 
 ```go
-lc := lifecycle.New(mgr, sub1, sub2, sub3).
-    WithConditions().
-    WithSpread()
+lc := lifecycle.New(mgr, "StoreController", func() client.Object { return &v1alpha1.Store{} },
+    sub1, sub2, sub3,
+).
+    WithConditions(conditions.NewManager()).
+    WithSpread(spread.NewManager())
 ```
 
 **Key design decisions:**
@@ -356,6 +391,7 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 │     └─ If not: return cached requeue time                  │
 │                                                            │
 │  5. If not deleting: add finalizers                        │
+│     └─ If added: return immediately (watch re-triggers)    │
 │                                                            │
 │  6. If PrepareContext set: enrich context                   │
 │                                                            │
@@ -383,14 +419,18 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 │     │     update condition, break loop          │           │
 │     │   - Track min requeue duration           │           │
 │     │   - On StopWithRequeue/Stop: break loop  │           │
+│     │   - On SkipAll: set remaining subs'      │           │
+│     │     conditions to Skipped, break loop    │           │
 │     └──────────────────────────────────────────┘           │
 │                                                            │
 │  9. Set Ready condition based on aggregate outcome         │
 │                                                            │
-│ 10. If successful + terminator configured + deleting:      │
-│     remove terminator from status                          │
-│ 11. If successful + initializer configured + not deleting: │
-│     remove initializer from status                         │
+│ 10. If all subroutines succeeded (no error, no stop, no    │
+│     pending, no requeue) + terminator configured +          │
+│     deleting: remove terminator from status                 │
+│ 11. If all subroutines succeeded (same conditions) +        │
+│     initializer configured + not deleting:                  │
+│     remove initializer from status                          │
 │                                                            │
 │ 12. If spread enabled: update next reconcile time          │
 │                                                            │
@@ -400,7 +440,7 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 │                                                            │
 │ 14. Patch status if changed (and not read-only)            │
 │                                                            │
-│ 15. Return (ctrl.Result, error)                             │
+│ 15. Return (reconcile.Result, error)                          │
 │      - Subroutine error (if any) for CR rate limiter        │
 │      - Infrastructure errors joined via errors.Join         │
 └────────────────────────────────────────────────────────────┘
@@ -410,7 +450,7 @@ lc := lifecycle.New(mgr, sub1, sub2, sub3).
 
 Conditions are opt-in. When enabled, the lifecycle manages:
 
-- **Per-subroutine condition**: `{SubroutineName}_Ready` (or `{SubroutineName}_Finalize` during deletion)
+- **Per-subroutine condition**: `{SubroutineName}` (or `{SubroutineName}Finalize` during deletion)
 - **Aggregate condition**: `Ready`
 
 Condition reasons map directly to the result:
@@ -422,9 +462,12 @@ Condition reasons map directly to the result:
 | `Pending(d, message), nil` | Unknown | `Pending` | False | `message` string |
 | `StopWithRequeue(d, message), nil` | False | `Stopped` | False | `message` string |
 | `Stop(message), nil` | False | `Stopped` | False | `message` string |
+| `SkipAll(true, message), nil` | True | `Complete` | **True** | `message` string |
+| `SkipAll(false, message), nil` | False | `Stopped` | **False** | `message` string |
+| _(remaining subs after SkipAll)_ | _(from ready flag)_ | `Skipped` | — | static |
 | `_, err` | False | `Error` | False | `err.Error()` |
 
-The aggregate `Ready` condition is only True when **all** subroutines completed with `OK()` (including `OKWithRequeue`) and no subroutine returned `Pending`, `StopWithRequeue`, `Stop`, or `error`.
+The aggregate `Ready` condition is only True when **all** subroutines completed with `OK()` (including `OKWithRequeue`) or were `Skipped` by a `SkipAll(true, ...)`, and no subroutine returned `Pending`, `StopWithRequeue`, `Stop`, or `error`.
 
 The `message` string from `Pending`/`StopWithRequeue`/`Stop` and `err.Error()` from error returns flow into the condition's `.message` field, giving operators clear visibility into exactly which subroutine is blocking readiness and why. The condition's `.reason` field (machine-readable, CamelCase) is set automatically from the result type (`Complete`, `Pending`, `Stopped`, `Error`).
 
@@ -444,17 +487,17 @@ No custom type. Subroutines operate on `client.Object` directly — the standard
 ### Builder API
 
 ```go
-lc := lifecycle.New(mgr,
+lc := lifecycle.New(mgr, "StoreController", func() client.Object { return &v1alpha1.Store{} },
     subroutine1,
     subroutine2,
     subroutine3,
 ).
-    WithConditions().
-    WithSpread().
+    WithConditions(conditions.NewManager()).
+    WithSpread(spread.NewManager()).
     WithPrepareContext(myContextFunc)
 ```
 
-The builder is on the `Lifecycle` struct itself — no separate `Builder` type.
+The builder is on the `Lifecycle` struct itself — no separate `Builder` type. `WithConditions` and `WithSpread` take explicit manager instances, which makes the dependency injection seam visible and simplifies testing. Both validate at construction time that the object type (produced by `newObj`) implements the required accessor interface, panicking if not.
 
 ### Error Reporting
 
@@ -463,8 +506,8 @@ In `golang-commons`, Sentry is deeply embedded: every `OperatorError` carries a 
 In runtime v2, **subroutines know nothing about error reporting**. The `Result` type has no Sentry field, no reporting flags. Instead, the `lifecycle` package defines an `ErrorReporter` interface that adopters implement to integrate their error reporting backend of choice (Sentry, OpenTelemetry, plain logging, etc.):
 
 ```go
-lc := lifecycle.New(mgr, sub1, sub2, sub3).
-    WithErrorReporter(reporter)
+lc := lifecycle.New(mgr, "StoreController", newObj, sub1, sub2, sub3).
+    WithErrorReporters(reporter)
 ```
 
 The `ErrorReporter` interface:
@@ -480,10 +523,20 @@ type ErrorReporter interface {
     Report(ctx context.Context, err error, info ErrorInfo)
 }
 
+// Action represents the type of operation a subroutine performs.
+type Action string
+
+const (
+    ActionProcess    Action = "process"
+    ActionFinalize   Action = "finalize"
+    ActionInitialize Action = "initialize"
+    ActionTerminate  Action = "terminate"
+)
+
 type ErrorInfo struct {
     Subroutine string        // which subroutine returned the error
     Object     client.Object // the object being reconciled
-    Action     string        // "process", "finalize", "initialize", or "terminate"
+    Action     Action        // which phase was running when the error occurred
 }
 ```
 
@@ -506,17 +559,19 @@ func (r *SentryReporter) Report(ctx context.Context, err error, info lifecycle.E
 
     r.hub.WithScope(func(scope *sentry.Scope) {
         scope.SetTag("subroutine", info.Subroutine)
-        scope.SetTag("action", info.Action)
+        scope.SetTag("action", info.Action.String())
         scope.SetTag("object", fmt.Sprintf("%s/%s",
             info.Object.GetNamespace(), info.Object.GetName()))
         r.hub.CaptureException(err)
     })
 }
 
-// Register one or more reporters — each WithErrorReporter call appends
-lc := lifecycle.New(mgr, sub1, sub2, sub3).
-    WithErrorReporter(&SentryReporter{hub: sentry.CurrentHub()}).
-    WithErrorReporter(&SlackAlerter{webhook: slackURL})
+// Register one or more reporters via variadic WithErrorReporters
+lc := lifecycle.New(mgr, "StoreController", newObj, sub1, sub2, sub3).
+    WithErrorReporters(
+        &SentryReporter{hub: sentry.CurrentHub()},
+        &SlackAlerter{webhook: slackURL},
+    )
 ```
 
 Common filtering patterns:
@@ -536,7 +591,7 @@ Rate limiting operates at two complementary levels:
 **Controller-level** — A coarse safety net on the work queue. The lifecycle supports configuring a rate limiter that controls how fast items re-enter the queue:
 
 ```go
-lc := lifecycle.New(mgr, sub1, sub2, sub3).
+lc := lifecycle.New(mgr, "StoreController", newObj, sub1, sub2, sub3).
     WithRateLimiter(workqueue.DefaultTypedItemBasedRateLimiter[reconcile.Request]())
 ```
 
@@ -544,7 +599,7 @@ This is the same concept as today's `WithStaticThenExponentialRateLimiter()`, bu
 
 **How they interact:**
 
-- For successful results (`nil` error), the lifecycle tracks the minimum requeue duration across all subroutine results and returns it as `ctrl.Result{RequeueAfter: minDuration}`
+- For successful results (`nil` error), the lifecycle tracks the minimum requeue duration across all subroutine results and returns it as `reconcile.Result{RequeueAfter: minDuration}`
 - For error results, controller-runtime [ignores the `Result`](https://github.com/kubernetes-sigs/controller-runtime/blob/v0.23.1/pkg/reconcile/reconcile.go#L117) and uses its rate limiter for backoff
 - The controller-level rate limiter governs the work queue independently — it applies regardless of subroutine-level timing
 
@@ -592,10 +647,10 @@ Controller-runtime already provides reconcile-level metrics (`controller_runtime
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `lifecycle_subroutine_duration_seconds` | Histogram | `controller`, `subroutine`, `action`, `outcome` | Per-subroutine duration |
-| `lifecycle_subroutine_errors_total` | Counter | `controller`, `subroutine`, `outcome` | Subroutine error count by type |
+| `lifecycle_subroutine_errors_total` | Counter | `controller`, `subroutine`, `action` | Subroutine error count by action |
 | `lifecycle_subroutine_requeue_seconds` | Histogram | `controller`, `subroutine`, `outcome` | Requeue delay requested by subroutine |
 
-Outcome labels: `ok`, `pending`, `stop`, `error`.
+Outcome labels: `ok`, `pending`, `stop`, `skip_all`, `error`.
 
 This gives operators dashboards for:
 - Which subroutines are slow
@@ -641,7 +696,7 @@ Condition management is one of the strongest features of the current lifecycle a
 
 **What it provides:**
 
-1. **Per-subroutine conditions** — Each subroutine gets a `{Name}_Ready` (or `{Name}_Finalize`) condition that reflects its last outcome. This makes it trivial to see which subroutine is blocking readiness.
+1. **Per-subroutine conditions** — Each subroutine gets a `{Name}` (or `{Name}Finalize`) condition that reflects its last outcome. This makes it trivial to see which subroutine is blocking readiness.
 
 2. **Aggregate Ready condition** — A top-level `Ready` condition that summarizes the overall state. Only `True` when all subroutines completed with `OK()` or `OKWithRequeue()` — no `Pending`, `StopWithRequeue`, `Stop`, or errors.
 
@@ -650,6 +705,8 @@ Condition management is one of the strongest features of the current lifecycle a
 4. **Reason/message from results** — The `message` string from `Pending(d, message)`, `StopWithRequeue(d, message)`, and `Stop(message)` flows into the condition's `.message` field, and `err.Error()` from error returns does the same. The condition's `.reason` (machine-readable) is set automatically from the result type. This gives operators clear visibility (e.g., message `"spec.endpoint is required"` with reason `Stopped` instead of a generic `"Error"`).
 
 5. **Opt-in** — Controllers that don't need conditions (e.g., simple cleanup controllers) pay no cost.
+
+6. **Pluggable** — The `ConditionManager` interface (`lifecycle/interfaces.go`) is the contract between the lifecycle engine and the condition implementation. The default `conditions.NewManager()` handles the standard per-subroutine + Ready condition pattern described above. For projects that need different condition semantics (e.g., compatibility with an existing condition format, custom aggregation logic, or additional condition types), a custom `ConditionManager` implementation can be provided to `WithConditions()` without changing the lifecycle engine.
 
 **What changes:**
 
@@ -682,7 +739,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 
 **What changes:**
 
-- Same core logic, same `RuntimeObjectSpreadReconcileStatus` interface requirement
+- Same core logic, same `SpreadReconcileStatus` interface requirement
 - Cleaner integration point (checked before subroutine loop, same as today)
 
 ---
@@ -703,7 +760,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 | **Finalization** | `Finalize`/`Finalizers` on core interface | Opt-in `Finalizer` interface |
 | **KCP init/terminate** | Built-in optional interfaces | Same pattern, returns `(Result, error)` |
 | **Sentry** | Built into reconcile loop, per-error `Sentry()` flag | No Sentry dependency; adopters bring their own `ErrorReporter` |
-| **Rate limiter** | Lifecycle-level, single strategy | Both controller-level and per-subroutine, any strategy |
+| **Rate limiter** | Lifecycle-level, single strategy | `WithRateLimiter()` accepts any `workqueue.TypedRateLimiter` |
 | **Spread scheduling** | Built-in, checked first | Built-in, checked first (same) |
 
 ---
@@ -717,7 +774,7 @@ PR #160 adds `ChainSubroutine` as a parallel interface alongside the existing `S
 | **Subroutine types** | `Subroutine` + `ChainSubroutine` + `BaseSubroutine` | `Subroutine` (base) + opt-in `Processor`, `Finalizer`, `Initializer`, `Terminator` |
 | **Lifecycle types** | `Lifecycle` + `ChainLifecycle` + `LifecycleCore` | Single `Lifecycle` |
 | **Backward compat** | Maintains, via type-switch | None (clean break) |
-| **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 4 Result actions (OK, Pending, StopWithRequeue, Stop) + Go `error` for unexpected failures |
+| **Outcomes** | 6 (Continue, StopChain, Skipped, ErrorRetry, ErrorContinue, ErrorStop) | 5 Result actions (OK, Pending, StopWithRequeue, Stop, SkipAll) + Go `error` for unexpected failures |
 | **Error propagation** | First error stops chain + returns immediately | Same — error stops chain; status patched before returning error to CR |
 | **Error behavior** | ErrorContinue/ErrorStop split | No split needed — errors always stop; `Pending()` covers the "not-ready but continue" case without overloading error semantics |
 | **Skipped** | Explicit outcome | Not needed — return `OK()` |
@@ -728,7 +785,7 @@ The fundamental issue with PR #160 is that it creates a parallel API surface to 
 
 **Additional differences in Result design:**
 
-- No `Skipped` outcome. A subroutine that has nothing to do returns `Result{}, nil` — skip is not a meaningful state for the lifecycle to act on differently from success.
+- No `Skipped` as an explicit subroutine return. `SkipAll` is a flow-control action returned by a subroutine to skip the *remaining* subroutines in the chain — it's a deliberate decision, not a per-subroutine state. The `Skipped` condition reason is set by the lifecycle on remaining subroutines, not returned by the subroutines themselves.
 - No `ErrorContinue` / `ErrorStop` distinction. Unexpected errors (Go `error` return) stop the chain — matching Go convention and controller-runtime behavior. Subroutines that need "continue despite not-ready" use `Pending()`, which is a known state, not an error.
 - No `ErrorRetry` / `ErrorStop` in `Result`. Unexpected errors use Go's standard `error` return. `Stop(message)` is a known business condition (string, not error). Clean separation.
 - Fields are unexported to prevent construction of invalid states.
@@ -744,11 +801,11 @@ The fundamental issue with PR #160 is that it creates a parallel API surface to 
 subroutines/                         # package subroutines — what subroutine authors import
 ├── subroutine.go                    //   Subroutine, Processor, Finalizer, Initializer, Terminator interfaces
 ├── result.go                        //   Result type and factory functions (OK, Pending, StopWithRequeue, ...)
-├── context.go                       //   ClientFromContext, logger enrichment utilities
+├── context.go                       //   ClientFromContext, WithClient, MustClientFromContext
 ├── lifecycle/                       # package lifecycle — what controller setup code imports
 │   ├── lifecycle.go                 //   Lifecycle struct, Reconcile method, builder API (New, With*)
-│   ├── errors.go                    //   ErrorReporter interface, ErrorInfo
-│   └── options.go                   //   Options, PrepareContext, ReadOnly, WithSpecPatch
+│   ├── error_types.go               //   ErrorReporter interface, ErrorInfo, Action type
+│   └── interfaces.go                //   ConditionManager, SpreadManager interfaces (lifecycle's dependency contracts)
 ├── conditions/                      # package conditions — opt-in condition management
 │   ├── manager.go                   //   ConditionManager implementation
 │   └── accessor.go                  //   ConditionAccessor interface
@@ -764,7 +821,7 @@ subroutines/                         # package subroutines — what subroutine a
 ```go
 import (
     "github.com/platform-mesh/subroutines"            // subroutines.Processor, subroutines.OK(), subroutines.Result
-    "github.com/platform-mesh/subroutines/lifecycle"   // lifecycle.New(mgr, sub1, sub2)
+    "github.com/platform-mesh/subroutines/lifecycle"   // lifecycle.New(mgr, "name", newObj, sub1, sub2)
     "github.com/platform-mesh/subroutines/conditions"  // conditions.ConditionAccessor (on CRD types)
 )
 ```
