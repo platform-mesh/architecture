@@ -584,31 +584,6 @@ Common filtering patterns:
 
 If no `ErrorReporter` is registered, the lifecycle simply logs errors — no silent swallowing.
 
-### Rate Limiting
-
-Rate limiting operates at two complementary levels:
-
-**Controller-level** — A coarse safety net on the work queue. The lifecycle supports configuring a rate limiter that controls how fast items re-enter the queue:
-
-```go
-lc := lifecycle.New(mgr, "StoreController", newObj, sub1, sub2, sub3).
-    WithRateLimiter(workqueue.DefaultTypedItemBasedRateLimiter[reconcile.Request]())
-```
-
-This is the same concept as today's `WithStaticThenExponentialRateLimiter()`, but accepts any `workqueue.TypedRateLimiter` — not locked to a single strategy.
-
-**How they interact:**
-
-- For successful results (`nil` error), the lifecycle tracks the minimum requeue duration across all subroutine results and returns it as `reconcile.Result{RequeueAfter: minDuration}`
-- For error results, controller-runtime [ignores the `Result`](https://github.com/kubernetes-sigs/controller-runtime/blob/v0.23.1/pkg/reconcile/reconcile.go#L117) and uses its rate limiter for backoff
-- The controller-level rate limiter governs the work queue independently — it applies regardless of subroutine-level timing
-
-**What changes from current:**
-
-| Aspect | golang-commons | runtime v2 |
-|---|---|---|
-| Controller-level limiter | `WithStaticThenExponentialRateLimiter()` only — no way to pass an arbitrary limiter | `WithRateLimiter()` accepts any `workqueue.TypedRateLimiter` |
-
 ### Observability: Tracing
 
 The current lifecycle creates a single span per `Reconcile` call and one child span per subroutine. This is preserved and extended:
@@ -760,7 +735,7 @@ Spreading distributes reconciliations over time to prevent thundering herd effec
 | **Finalization** | `Finalize`/`Finalizers` on core interface | Opt-in `Finalizer` interface |
 | **KCP init/terminate** | Built-in optional interfaces | Same pattern, returns `(Result, error)` |
 | **Sentry** | Built into reconcile loop, per-error `Sentry()` flag | No Sentry dependency; adopters bring their own `ErrorReporter` |
-| **Rate limiter** | Lifecycle-level, single strategy | `WithRateLimiter()` accepts any `workqueue.TypedRateLimiter` |
+| **Rate limiter** | Lifecycle-level, single strategy | Not managed by lifecycle; consumers configure `controller.TypedOptions.RateLimiter` directly during controller setup |
 | **Spread scheduling** | Built-in, checked first | Built-in, checked first (same) |
 
 ---
