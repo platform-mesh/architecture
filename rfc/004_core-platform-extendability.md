@@ -4,11 +4,11 @@
 |---------|--------------------------------------------------------------|
 | Author  | @mjudeikis                                                   |
 | Created | 2026-03-03                                                   |
-| Updated | 2026-03-03                                                   |
+| Updated | 2026-03-06                                                   |
 
 ## Summary
 
-Platform Mesh should treat all capabilities—including core features like Search and Terminal—as providers. This moves us from thinking "Core vs. Provider" to "Core vs. Pluggable Services", making the platform more modular and preventing core bloat.
+Platform Mesh should treat all capabilities—including core features like Search and Terminal—as providers. This moves us from thinking "Core vs. Provider" to "Core vs. Builtin Providers vs Third-Party Providers", making the platform more modular and preventing core bloat.
 
 ## Motivation
 
@@ -16,7 +16,7 @@ We keep adding features directly to core, which creates maintenance burden and t
 
 - Force ourselves to improve the provider framework (dogfooding)
 - Allow teams to own their scope (Search team maintains search-provider repo)
-- Give adopters the modularity they've been asking for
+- Give adopters the modularity they require
 - Support regional deployments that need to disable or swap capabilities
 
 ## Context and Problem Statement
@@ -129,6 +129,16 @@ We still need to prevent users from messing with system resources:
 | Admin override | Org admins can disable providers if needed (e.g., drop a 1TB index to save costs) |
 
 The point is: it should be *possible* for admins to disable things, just guarded. If I'm a startup and don't care about monitoring this week, why shouldn't I be able to turn it off?
+
+### Provider Migration on Existing Workspaces
+
+A key benefit of the provider model is that services can be replaced on existing workspaces without requiring workspace re-creation. For example, when introducing a new observability stack:
+
+1. **Bind** the new provider's API to the workspace
+2. **Migrate** data and configuration from old to new provider
+3. **Unbind** the old provider's API
+
+This only works if providers do not assume the workspace is in an initializing state to perform their setup. Providers must be designed to configure themselves against workspaces in any lifecycle phase—not just during initial creation. This is another reason to move away from `WorkspaceType` initializers: they only run at creation time, making day-2 service replacement impossible.
 
 ### Config vs Instance Bindings
 
