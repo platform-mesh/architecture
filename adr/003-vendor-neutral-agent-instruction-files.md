@@ -1,4 +1,4 @@
-# ADR 002: Vendor-Neutral Agent Instruction Files
+# ADR 003: Vendor-Neutral Agent Instruction Files
 
 | Status  | Proposed   |
 |---------|------------|
