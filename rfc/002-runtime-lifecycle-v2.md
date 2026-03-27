@@ -2,7 +2,9 @@
 
 | Status  | Implemented                                                                     |
 |---------|------------------------------------------------------------------------------------|
-| Date    | 2026-03-02                                                                         |
+| Author  | @nexus49                                                                           |
+| Created | 2026-03-02                                                                         |
+| Updated | 2026-03-27                                                                         |
 | RFC PR  | [link](https://github.com/platform-mesh/architecture/pull/9)                       |
 | Impl    | [platform-mesh/subroutines](https://github.com/platform-mesh/subroutines)          |
 
