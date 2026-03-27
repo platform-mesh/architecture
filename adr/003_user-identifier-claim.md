@@ -11,7 +11,7 @@ decision-makers: Platform Mesh team
 Platform Mesh authenticates users via Keycloak-issued JWT tokens (potentially through a federated IdP). The token passes through multiple systems — each with its own constraints on which claims are available:
 
 1. **Keycloak** signs the JWT containing claims like `sub`, `email`, `preferred_username`, etc.
-2. **KCP / Kubernetes API Server** validates the JWT via OIDC integration and extracts a username based on the `username.claim` configured in a `WorkspaceAuthenticationConfiguration` (KCP) / `StructuredAuthenticationConfiguration` (Kubernetes) resource.
+2. **kcp / Kubernetes API Server** validates the JWT via OIDC integration and extracts a username based on the `username.claim` configured in a `WorkspaceAuthenticationConfiguration` (kcp) / `StructuredAuthenticationConfiguration` (Kubernetes) resource.
 3. **rebac-authorization-webhook** receives a `SubjectAccessReview` from the API server for authorization decisions. At this point, only the extracted `user`, `groups`, `uid`, and `extra` fields are available — the original JWT claims are gone.
 4. **OpenFGA** stores relationship tuples that reference users by identifier. The authorization webhook must be able to correlate the user from the `SubjectAccessReview` with tuples stored in OpenFGA.
 
