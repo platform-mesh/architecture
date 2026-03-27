@@ -128,6 +128,8 @@ Why pull over push for metrics:
 
 Applications push trace spans to the collector's OTLP endpoint (gRPC on port 4317, HTTP on port 4318). RFC 002 defines the span structure — per-subroutine spans with structured attributes (`subroutine.name`, `subroutine.action`, `subroutine.outcome`, etc.). The collector receives these spans and forwards them to whichever trace backend is configured.
 
+The OTLP endpoint is cluster-internal traffic (exposed via a ClusterIP Service) and is not authenticated by default. This is consistent with how most cluster-internal telemetry endpoints operate (e.g., Prometheus scrape targets, Kubernetes API metrics). If stronger isolation is needed, this can be addressed at the deployment level — for example, via mTLS through a service mesh, `NetworkPolicy` rules restricting which namespaces or pods can reach the OTLP ports, or the collector's built-in [authentication extensions](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension) (e.g., `bearertokenauth`, `oidcauth`). These are deployment-time choices and not part of the default collection pipeline.
+
 ### Logs — Tailed by DaemonSet Agent
 
 All components — platform-mesh operators, third-party tools (KCP, cert-manager, Keycloak, PostgreSQL), and Node.js services — write structured logs to stdout. Kubernetes captures this output to files on the node filesystem at `/var/log/pods/`.
