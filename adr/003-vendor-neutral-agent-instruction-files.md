@@ -41,15 +41,17 @@ Chosen option: **"Adopt `AGENTS.md` as the primary instruction file"**, because 
 
 ### Implementation
 
-1. **Create `AGENTS.md` at the root of each repository** containing project-specific context: project overview, build commands, code conventions, testing patterns, and architectural guidance.
+1. **Create `AGENTS.md` at the root of each repository** containing agent-specific context: build commands, code conventions, testing patterns, and architectural guidance. The language should be terse and imperative — optimized for AI tool consumption, not human readability.
 2. **Create per-directory `AGENTS.md` files** where needed within repositories that contain multiple projects (e.g., individual chart directories in `helm-charts/`).
-3. **Do not commit vendor-specific instruction files** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`). All agent guidance should go through `AGENTS.md`.
-4. **Content guidelines for `AGENTS.md`**:
-   - Keep it concise and human-authored. Research shows that LLM-generated instruction files reduce agent performance.
+3. **Instruct agents to consume `CONTRIBUTING.md`** — each `AGENTS.md` file should reference the repository's `CONTRIBUTING.md` and instruct agents to follow the contributing guidelines in addition to the agent-specific instructions. This keeps human-facing guidance (contribution workflow, review process, code of conduct) in `CONTRIBUTING.md` and agent-facing guidance (terse commands, hard boundaries, conventions) in `AGENTS.md`.
+4. **Do not commit vendor-specific instruction files** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`). All agent guidance should go through `AGENTS.md`.
+5. **Content guidelines for `AGENTS.md`**:
+   - Keep it concise, terse, and human-authored. Use imperative language. Research shows that LLM-generated instruction files reduce agent performance.
    - Focus on judgment calls, architecture, and boundaries — move enforceable rules to linter configs and toolchain settings.
    - Use plain Markdown with no required schema. Any headings and structure that aids comprehension.
    - Include: build/test commands, code conventions, project structure, git conventions, and hard boundaries (things agents must never do).
-   - Exclude: information already in README.md, enforceable linting rules, verbose documentation that belongs in docs/.
+   - Exclude: information already in `CONTRIBUTING.md` or `README.md`, enforceable linting rules, verbose documentation that belongs in docs/.
+6. **Ensure `CONTRIBUTING.md` exists for each active repository** — human-facing contribution guidelines (workflow, review process, style guidance in prose form) should live there, not in `AGENTS.md`.
 
 ### Consequences
 
@@ -59,7 +61,9 @@ Chosen option: **"Adopt `AGENTS.md` as the primary instruction file"**, because 
 * Good, because new team members and external contributors using any AI tool immediately get project-specific guidance without additional setup.
 * Good, because the format is plain Markdown with no proprietary schema, making it reviewable in standard code review workflows.
 * Good, because per-directory `AGENTS.md` files support repositories with multiple projects.
+* Good, because separating agent instructions (`AGENTS.md`) from human contribution guidelines (`CONTRIBUTING.md`) allows distinct language and detail levels for each audience — terse and imperative for agents, descriptive and contextual for humans.
 * Neutral, because no existing committed files need migration — this is a greenfield adoption.
+* Neutral, because repositories will need `CONTRIBUTING.md` files alongside `AGENTS.md` — but contributing guidelines are valuable independently of this decision.
 * Neutral, because adoption of `AGENTS.md` by future AI tools is expected but not guaranteed — however, the format is simple enough that any tool can parse it with minimal effort.
 
 ## Pros and Cons of the Options
@@ -103,10 +107,11 @@ Add separate instruction files for each AI coding tool to each repository.
 
 ### Rollout Plan
 
-1. Draft an `AGENTS.md` for each active repository containing project-specific build commands, conventions, and architectural guidance.
-2. Add per-directory `AGENTS.md` files where repositories contain multiple projects (e.g., `helm-charts/`).
-3. Remove any tool-specific instruction files (`.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`) if they exist, since `AGENTS.md` supersedes them.
-4. Update contributing guidelines to reference `AGENTS.md` as the standard for agent instructions across all repositories.
+1. Ensure each active repository has a `CONTRIBUTING.md` with human-facing contribution guidelines (workflow, review process, style guidance).
+2. Draft an `AGENTS.md` for each active repository containing terse, agent-specific build commands, conventions, and architectural guidance. Include a directive for agents to also read `CONTRIBUTING.md`.
+3. Add per-directory `AGENTS.md` files where repositories contain multiple projects (e.g., `helm-charts/`).
+4. Remove any tool-specific instruction files (`.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`) if they exist, since `AGENTS.md` supersedes them.
+5. Update contributing guidelines to reference `AGENTS.md` as the standard for agent instructions across all repositories.
 
 ### Related Resources
 
