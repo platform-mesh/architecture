@@ -289,6 +289,38 @@ The OTel Collector has no role in alerting — it is purely a collection and for
 
 ---
 
+## In-Flight Buffering and Data Loss
+
+The OTel Collector is a **forwarding pipeline, not a storage system**. It holds data in memory between receiving and exporting — there is no persistent on-disk buffer. This has different implications for each signal.
+
+### Behavior by Signal
+
+| Signal | Collection | During gateway downtime | During backend downtime |
+|--------|-----------|------------------------|------------------------|
+| Metrics | Pull (scrape) | Missed scrapes create gaps; next scrape picks up current values — no cumulative loss for gauges, but counter deltas for the missed interval are gone | `memory_limiter` applies backpressure; data is dropped if the export queue fills up |
+| Traces | Push (OTLP) | Applications receive gRPC/HTTP errors; spans are dropped unless the app has its own retry/queue (OTel SDKs have a limited in-memory queue with retry, but it is bounded) | Same — `memory_limiter` and batch queue limits apply; excess spans are dropped |
+| Logs | Tail (filelog) | The DaemonSet agent checkpoints file offsets (when a [storage extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/extension/storage/filestorage/README.md) is configured) — it resumes from the last position after restart, so **no log loss** during agent restarts. If the gateway is down, the agent's export queue fills and applies backpressure | Gateway drops logs if the export queue fills up |
+
+### Key Mechanisms
+
+- **[`memory_limiter` processor](https://github.com/open-telemetry/opentelemetry-collector/blob/main/processor/memorylimiterprocessor/README.md)** — Monitors the collector's memory usage and drops data when a configurable threshold is reached. This prevents OOM kills but means data loss under sustained backpressure. It is a safety valve, not a buffer.
+- **[`batch` processor](https://github.com/open-telemetry/opentelemetry-collector/blob/main/processor/batchprocessor/README.md)** — Batches telemetry before export for efficiency. It holds data in memory briefly (default: 200ms or 8192 items, whichever comes first). This is not a retry buffer — if the export fails, the batch is retried a limited number of times, then dropped.
+- **[Exporter `sending_queue` and `retry_on_failure`](https://github.com/open-telemetry/opentelemetry-collector/blob/main/exporter/exporterhelper/README.md)** — OTLP exporters support a bounded in-memory queue (`sending_queue`, default size: 5120 batches) with exponential-backoff retry for transient failures. Once the queue is full, new data is dropped. The queue can optionally be backed by persistent storage via a [`file_storage` extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/extension/storage/filestorage/README.md).
+- **[`filelog` receiver checkpointing](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/filelogreceiver/README.md)** — The filelog receiver tracks file read offsets. When configured with a `storage` extension, offsets are persisted to disk, allowing the agent to resume from where it left off after a restart. Without a storage extension, offsets are in-memory only and lost on restart — a storage extension must be configured for durable checkpoint behavior.
+
+### What This Means in Practice
+
+For **local development**, brief interruptions are irrelevant — telemetry gaps during a collector restart are acceptable.
+
+For **production**, the risk profile is:
+- **Logs are the most resilient** — file-based tailing with checkpointing (when backed by a storage extension) survives collector restarts without loss
+- **Metrics are self-healing** — missed scrapes create gaps but no drift; the next successful scrape reflects current state
+- **Traces are the most fragile** — push-based with bounded in-memory queues on both the application side (OTel SDK) and the collector side; sustained gateway or backend outages cause span loss
+
+If durability guarantees beyond in-memory buffering are needed, the exporter tier can be configured to write to a persistent queue (e.g., via a [Kafka exporter](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/exporter/kafkaexporter/README.md) or the collector's [`file_storage` extension for persistent queues](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/extension/storage/filestorage/README.md)). This is a deployment-time decision and out of scope for this RFC.
+
+---
+
 ## Alternatives Considered
 
 ### Sidecar Deployment Model
