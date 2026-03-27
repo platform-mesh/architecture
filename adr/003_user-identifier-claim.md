@@ -59,7 +59,7 @@ This is a deliberate trade-off: we accept that email addresses are visible to pl
 
 ### Confirmation
 
-* Verify that `username.claim` is set to `email` in the `WorkspaceAuthenticationConfiguration` resources on all KCP workspaces.
+* Verify that `username.claim` is set to `email` in the `WorkspaceAuthenticationConfiguration` resources on all kcp workspaces.
 * Verify that OpenFGA tuples reference users by email.
 * Document a runbook for handling email changes and GDPR erasure requests covering OpenFGA tuples, Kubernetes RBAC bindings, and audit logs.
 
