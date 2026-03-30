@@ -8,7 +8,7 @@
 
 ## Summary
 
-Two controllers inside the Platform-mesh operator that automate provider bootstrap and lifecycle. `ProviderSetup` is a kcp-level resource that handles kcp-side bootstrap only (SA, RBAC, APIExport, kubeconfig). `ManagedProvider` is a runtime-cluster CRD that orchestrates the full lifecycle — creating the workspace, triggering ProviderSetup, copying secrets, and deploying workloads. This separation ensures that a kcp-level resource can never cause deployments into the runtime cluster.
+Two controllers inside the Platform-mesh operator that automate provider bootstrap and lifecycle. `Provider` is a kcp-level resource that handles kcp-side bootstrap only (SA, RBAC, APIExport, kubeconfig). `ManagedProvider` is a runtime-cluster CRD that orchestrates the full lifecycle — creating the workspace, triggering Provider, copying secrets, and deploying workloads. This separation ensures that a kcp-level resource can never cause deployments into the runtime cluster.
 
 ## Motivation
 
