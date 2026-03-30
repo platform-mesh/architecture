@@ -32,12 +32,12 @@ It is problematic to offer a resource in kcp that can cause deployments into the
 
 ### Workspace and APIExport Layout
 
-All providers live under `:root:system:providers`. This workspace exposes the `providers` APIExport, bound recursively so any workspace can create `Provider` resources.
+All providers live under `:root:providers:system`. This workspace exposes the `providers` APIExport, bound recursively so any workspace can create `Provider` resources.
 
 ```
 :root
-  └── :system
-        └── :providers                          ← APIExport: providers (exposes Provider)
+  └── :providers
+        └── :system                          ← APIExport: providers (exposes Provider)
               ├── :wildwest                     ← bootstrapped provider workspace
               ├── :httpbin                      ← bootstrapped provider workspace
               └── ...
@@ -103,7 +103,7 @@ metadata:
   name: wildwest
   namespace: platform-mesh-system
 spec:
-  workspacePath: "root:system:providers:wildwest" # optional, defaults to root:system:providers:<name>
+  workspacePath: "root:providers:wildwest" # optional, defaults to root:providers:system:<name>
   controller:
     ocm:
       componentName: github.com/platform-mesh/wildwest-controller
