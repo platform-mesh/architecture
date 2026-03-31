@@ -32,15 +32,15 @@ It is problematic to offer a resource in kcp that can cause deployments into the
 
 ### Workspace and APIExport Layout
 
-All providers live under `:root:providers:system`. This workspace exposes the `providers` APIExport, bound recursively so any workspace can create `Provider` resources.
+`:root:providers:system` exposes the `providers` APIExport with recursive binding. Provider workspaces live directly under `:root:providers:<name>`.
 
 ```
 :root
   └── :providers
-        └── :system                          ← APIExport: providers (exposes Provider)
-              ├── :wildwest                     ← bootstrapped provider workspace
-              ├── :httpbin                      ← bootstrapped provider workspace
-              └── ...
+        ├── :system                            ← APIExport: providers (exposes Provider, recursive bind)
+        ├── :wildwest                          ← bootstrapped provider workspace
+        ├── :httpbin                           ← bootstrapped provider workspace
+        └── ...
 ```
 
 ### Architecture
