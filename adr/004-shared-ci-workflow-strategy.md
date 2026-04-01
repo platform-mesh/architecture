@@ -8,7 +8,7 @@
 
 Platform Mesh maintains a [`.github` repository](https://github.com/platform-mesh/.github) with shared GitHub Actions workflows called by all repositories. These include **pipeline workflows** (end-to-end orchestrations like `pipeline-golang-app.yml`, `pipeline-chart.yml`) and **job workflows** (self-contained building blocks like `job-docker.yml`, `job-ocm.yml`, `job-sbom.yml`).
 
-Fully shared pipelines create problems observed both internally and in other projects (notably [Crossplane's shared build system](https://github.com/crossplane/build)):
+Fully shared pipelines create problems observed both internally and in other open-source projects using this pattern:
 
 * **Fragile coupling**: Any pipeline change affects every consuming repository and cannot be tested in isolation.
 * **Lowest common denominator**: Repositories with different needs require `if/else` branches in shared workflows, increasing complexity for all consumers.
@@ -41,7 +41,3 @@ A workflow should remain shared only if it is **self-contained**, **well-paramet
 * Good, because repositories with unique requirements can accommodate them without polluting shared workflows.
 * Good, because standardized building blocks remain shared, ensuring consistency where it matters.
 * Bad, because pipeline definitions are duplicated across repositories, creating the possibility of drift (mitigated by agent-assisted cross-repo PRs).
-
-## More Information
-
-* [Crossplane build](https://github.com/crossplane/build) — shared build system across 100+ repos that became effectively immutable because changes risk breaking many repositories.
