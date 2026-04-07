@@ -1,6 +1,6 @@
 # ADR 005: Default Test Coverage Thresholds
 
-| Status  | Proposed   |
+| Status  | Approved   |
 |---------|------------|
 | Date    | 2026-04-02 |
 

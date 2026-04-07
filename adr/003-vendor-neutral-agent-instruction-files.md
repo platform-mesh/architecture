@@ -1,8 +1,8 @@
 # ADR 003: Vendor-Neutral Agent Instruction Files
 
-| Status  | Proposed   |
+| Status  | Approved   |
 |---------|------------|
-| Date    | 2026-03-26 |
+| Date    | 2026-03-27 |
 
 ## Context and Problem Statement
 

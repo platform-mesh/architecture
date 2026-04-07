@@ -1,6 +1,6 @@
 # ADR 004: Shared CI Workflow Strategy
 
-| Status  | Proposed   |
+| Status  | Approved   |
 |---------|------------|
 | Date    | 2026-04-01 |
 

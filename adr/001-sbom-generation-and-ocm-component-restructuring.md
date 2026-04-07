@@ -1,8 +1,8 @@
 # ADR 001: SBOM Generation and OCM Component Restructuring for Docker Images
 
-| Status  | Proposed   |
+| Status  | Approved   |
 |---------|------------|
-| Date    | 2026-02-27 |
+| Date    | 2026-03-02 |
 
 ## Context and Problem Statement
 
