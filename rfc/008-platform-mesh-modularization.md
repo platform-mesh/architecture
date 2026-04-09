@@ -101,6 +101,7 @@ graph TD
         ReBACWH[ReBAC AuthZ Webhook]
         SecOp[security-operator]
         AccOp[account-operator]
+        IAM[iam-service]
     end
 
     subgraph "Layer 1 — Control Plane &#40;always required&#41;"
@@ -116,8 +117,11 @@ graph TD
     ReBACWH -->|authz webhook| KCP
     ReBACWH --> FGA
     SecOp --> FGA
+    SecOp --> KC
     AccOp --> FGA
     AccOp --> KCP
+    IAM --> FGA
+    IAM --> KC
     ExtMgr --> KCP
     PMOp --> Flux
     Flux --> KCP
@@ -207,13 +211,16 @@ it, but outer layers can be omitted without breaking inner ones.
   and expects Flux controllers to reconcile them) (ArgoCD in Future)
 
 **Layer 2 — Accounts, Authorization, Authentication (optional as a whole and per component):**
-- account-operator
-- Keycloak / iam-service (identity provider)
+- security-operator (bootstraps Keycloak, manages OpenFGA stores/models/tuples)
+- account-operator (account lifecycle, writes account relationship tuples to OpenFGA)
+- iam-service (user queries, writes user role assignment tuples to OpenFGA)
+- Keycloak (identity provider)
 - OpenFGA (authorization engine)
 - rebac-authorization-webhook
 
 **Layer 3 — Portal, Extensibility, API Compositions (optional):**
 - OpenMFP Portal + GraphQL Gateway (kubernetes-graphql-gateway)
+- virtual-workspaces (provides Virtual Workspace API, required when Portal is enabled)
 - extension-manager-operator
 - Portal UI, IAM UI
 - Marketplace-UI
@@ -247,18 +254,19 @@ or single-tenant environments.
 ### RBAC Fallback When OpenFGA Is Disabled
 
 When OpenFGA is not active, Platform Mesh must manage Kubernetes RBAC resources
-as a fallback for roles and permissions. Today the `security-operator` and
-`account-operator` maintain the authorization model and tuples in OpenFGA.
+as a fallback for roles and permissions. Today the `security-operator`,
+`account-operator`, and `iam-service` write authorization tuples to OpenFGA.
 Analogously, these operators must create and reconcile the equivalent Kubernetes
 RBAC resources (Roles, RoleBindings, ClusterRoles, ClusterRoleBindings) when
 OpenFGA is absent.
 
 ### Static OIDC Client Configuration
 
-When using an external IdP instead of Keycloak, operators must be able to define
-static OIDC client information (client ID, client secret, issuer URL) directly in
-the PlatformMesh resource. This avoids the need for dynamic client registration
-which external IdPs may not support.
+Keycloak currently uses OIDC Dynamic Client Registration (RFC 7591) to
+provision OIDC clients per organization. When using an external IdP instead of
+Keycloak, operators must be able to define static OIDC client information
+(client ID, client secret, issuer URL) directly in the PlatformMesh resource,
+as external IdPs typically do not support dynamic client registration.
 
 ### OIDC Scope Parameterization
 
@@ -296,20 +304,25 @@ footprint and the migration approach for each.
 **Managed state:**
 - Per-account FGA stores, each containing an authorization model (type
   definitions and relation configurations)
-- Authorization tuples written by the `security-operator` (e.g.
-  `APIExportPolicy` bindings tracked via `status.managedAllowExpressions`)
-  and the `account-operator` (account-level relations and inherited
-  permissions)
+- Authorization tuples written by three distinct operators:
+  - `security-operator`: baseline tuples, store creation, authorization model
+    management (tracked via `status.managedAllowExpressions`)
+  - `account-operator`: account relationship tuples (parent relations,
+    creator→owner role assignments)
+  - `iam-service`: user role assignment tuples (written via
+    `assignRolesToUsers` / `removeRole` GraphQL mutations)
 
 **Removing OpenFGA (switching to Kubernetes RBAC):**
 1. For each account, read the existing OpenFGA tuples and derive equivalent
    Kubernetes RBAC resources (Roles, RoleBindings, ClusterRoles,
-   ClusterRoleBindings). The `security-operator` and `account-operator`
-   already understand both models and must perform this translation.
+   ClusterRoleBindings). This must cover tuples from all three writers:
+   `security-operator` (API access policies), `account-operator` (account
+   hierarchy and ownership), and `iam-service` (user role assignments).
 2. Apply the generated RBAC resources and verify that access decisions match
    the previous OpenFGA state (e.g. by running the E2E authorization tests
    against the RBAC-only configuration).
-3. Disable the `rebac-authorization-webhook` in kcp and remove the OpenFGA
+3. Disable the `rebac-authorization-webhook` in kcp (toggle:
+   `values.infra.values.kcp.webhook.enabled`) and remove the OpenFGA
    deployment.
 4. Clean up orphaned FGA store references in account specs
    (`Spec.FGA.Store.Id`).
@@ -317,7 +330,8 @@ footprint and the migration approach for each.
 **Adding OpenFGA to an existing RBAC-only deployment:**
 1. Deploy OpenFGA and the `rebac-authorization-webhook`.
 2. For each account, create an FGA store and seed the authorization model.
-3. Translate existing Kubernetes RBAC resources into OpenFGA tuples.
+3. Translate existing Kubernetes RBAC resources into OpenFGA tuples for all
+   three tuple writers (security-operator, account-operator, iam-service).
 4. Enable the authorization webhook in kcp and verify access decisions.
 5. Optionally remove the now-redundant Kubernetes RBAC resources once the
    webhook is confirmed operational.
@@ -330,19 +344,31 @@ process: first apply the new state, then cut over, then clean up the old state.
 #### Keycloak
 
 **Managed state:**
-- Realms (typically one per organization)
-- OIDC clients (for kcp, portal, and other components)
-- User identities and group mappings
+- Realms (one per organization, created by the `security-operator`
+  IDP subroutine)
+- OIDC clients registered via Dynamic Client Registration (RFC 7591),
+  with registration access tokens and client secrets stored in Kubernetes
+  Secrets
+- Service account clients (`security-operator`, `iam-service`) bootstrapped
+  via init container with admin realm role
+- User identities, group mappings, and invite state
+- Workspace authentication configuration per organization
+  (`WorkspaceAuthenticationConfiguration`)
 
 **Removing Keycloak (switching to an external IdP):**
 1. Configure static OIDC client information in the PlatformMesh resource
    (issuer URL, client ID, client secret) pointing to the external IdP.
+   This replaces Keycloak's Dynamic Client Registration which external IdPs
+   typically do not support.
 2. Ensure the external IdP has equivalent users and group mappings. This is
    an operational prerequisite that must be completed before migration.
-3. Reconfigure kcp to validate tokens from the new issuer.
-4. If OpenMFP is active, update its OIDC scope configuration (e.g. add
+3. Update `WorkspaceAuthenticationConfiguration` resources to reference the
+   new issuer URL and JWT audiences.
+4. Reconfigure kcp to validate tokens from the new issuer.
+5. If OpenMFP is active, update its OIDC scope configuration (e.g. add
    `offline_access` for Dex).
-5. Remove the Keycloak deployment and its backing database.
+6. Remove the Keycloak deployment, its backing PostgreSQL database, and the
+   now-unused OIDC client secrets.
 
 **Adding Keycloak to a deployment using an external IdP:**
 1. Deploy Keycloak and provision realms and OIDC clients for each existing
