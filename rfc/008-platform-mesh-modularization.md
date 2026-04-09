@@ -50,8 +50,7 @@ remains valuable regardless of the surrounding technology choices.
 ## Security Rationale
 
 In security-hardened and compliance-heavy environments, fewer running components
-means a smaller attack surface. This is a direct requirement under BSI Grundschutz
-(SYS.1.1.A6).
+means a smaller attack surface.
 
 - **OpenFGA** is called on every kcp API request via webhook. In deployments where
   ReBAC is not required, e.g. single-tenant or environments with existing
@@ -279,9 +278,104 @@ It must be possible to add or remove optional components after the initial
 deployment. For example, adding the portal layer to an initially API-only
 deployment, including all dependent components, should be a supported operation.
 
-> **Open question:** Whether OpenFGA can be added or removed post-deployment
-> requires further investigation due to the authorization state migration
-> involved.
+Whether full runtime mutability is required at day-1 or can be deferred is an
+open question. As a minimum, the initial release must support selecting the
+desired configuration variant at install time. Post-deployment changes (adding
+or removing components on a running instance) can follow in a subsequent release
+once the migration paths described below are validated.
+
+### State Management and Migration Strategy
+
+Each optional component manages different kinds of state. When components are
+added to or removed from a running deployment, this state must be created,
+migrated, or cleaned up. The following outlines the per-component data
+footprint and the migration approach for each.
+
+#### OpenFGA
+
+**Managed state:**
+- Per-account FGA stores, each containing an authorization model (type
+  definitions and relation configurations)
+- Authorization tuples written by the `security-operator` (e.g.
+  `APIExportPolicy` bindings tracked via `status.managedAllowExpressions`)
+  and the `account-operator` (account-level relations and inherited
+  permissions)
+
+**Removing OpenFGA (switching to Kubernetes RBAC):**
+1. For each account, read the existing OpenFGA tuples and derive equivalent
+   Kubernetes RBAC resources (Roles, RoleBindings, ClusterRoles,
+   ClusterRoleBindings). The `security-operator` and `account-operator`
+   already understand both models and must perform this translation.
+2. Apply the generated RBAC resources and verify that access decisions match
+   the previous OpenFGA state (e.g. by running the E2E authorization tests
+   against the RBAC-only configuration).
+3. Disable the `rebac-authorization-webhook` in kcp and remove the OpenFGA
+   deployment.
+4. Clean up orphaned FGA store references in account specs
+   (`Spec.FGA.Store.Id`).
+
+**Adding OpenFGA to an existing RBAC-only deployment:**
+1. Deploy OpenFGA and the `rebac-authorization-webhook`.
+2. For each account, create an FGA store and seed the authorization model.
+3. Translate existing Kubernetes RBAC resources into OpenFGA tuples.
+4. Enable the authorization webhook in kcp and verify access decisions.
+5. Optionally remove the now-redundant Kubernetes RBAC resources once the
+   webhook is confirmed operational.
+
+**Rollback:** If the migration fails mid-way, the previous authorization
+mechanism (RBAC or OpenFGA) remains intact because it is not removed until the
+new mechanism is verified. The migration must be designed as a two-phase
+process: first apply the new state, then cut over, then clean up the old state.
+
+#### Keycloak
+
+**Managed state:**
+- Realms (typically one per organization)
+- OIDC clients (for kcp, portal, and other components)
+- User identities and group mappings
+
+**Removing Keycloak (switching to an external IdP):**
+1. Configure static OIDC client information in the PlatformMesh resource
+   (issuer URL, client ID, client secret) pointing to the external IdP.
+2. Ensure the external IdP has equivalent users and group mappings. This is
+   an operational prerequisite that must be completed before migration.
+3. Reconfigure kcp to validate tokens from the new issuer.
+4. If OpenMFP is active, update its OIDC scope configuration (e.g. add
+   `offline_access` for Dex).
+5. Remove the Keycloak deployment and its backing database.
+
+**Adding Keycloak to a deployment using an external IdP:**
+1. Deploy Keycloak and provision realms and OIDC clients for each existing
+   organization.
+2. Sync or federate users from the external IdP into Keycloak.
+3. Reconfigure kcp and other components to use the Keycloak issuer.
+4. Remove the static OIDC client configuration.
+
+**Rollback:** Keep the external IdP configuration intact until Keycloak is
+verified. If Keycloak provisioning fails, the static OIDC configuration
+continues to work without interruption. Reverse the kcp issuer change to
+restore the previous state.
+
+#### Portal Layer (OpenMFP, GraphQL Gateway)
+
+**Managed state:**
+- The portal layer is largely stateless. It aggregates ContentConfiguration
+  and APIBinding resources stored in kcp (etcd). No external database or
+  persistent storage is involved.
+
+**Adding the portal layer:**
+1. Deploy OpenMFP, the GraphQL Gateway, and the extension-manager-operator.
+2. The portal reads existing kcp resources on startup — no data migration
+   is needed.
+
+**Removing the portal layer:**
+1. Remove the portal deployments. ContentConfiguration resources remain in
+   kcp and are harmless if unused.
+2. No data cleanup is strictly required, though orphaned ContentConfiguration
+   resources can be removed for hygiene.
+
+**Rollback:** Re-deploy the portal components. Since no state is destroyed
+during removal, the portal restores its previous view immediately.
 
 ### Defined Interfaces, Not Specific Implementations
 
@@ -353,11 +447,23 @@ excluded from a deployment without causing others to fail.
    authorization, and portal interfaces that alternative implementations must
    satisfy? Even informal documentation would be a useful starting point.
 
-3. **OpenFGA as optional**  The OpenFGA authorization webhook is currently called
-   on every kcp API request.  What would RBAC-only mode look like?  Is this a
-   configuration change or a code change?  Do we want to provide default RBAC or is it a consumer problem?
+3. **RBAC-only mode implementation**  The RBAC fallback when OpenFGA is absent
+   is described in this RFC, but the exact implementation is open: is disabling
+   the authorization webhook a kcp configuration change, a code change in the
+   Platform Mesh Operator, or both?
 
-4. **Roadmap**  Is component replaceability on the Platform Mesh roadmap?  Are
+4. **Day-1 scope for runtime mutability**  Should the first release support
+   changing configuration variants on a running deployment, or is install-time
+   selection sufficient initially? The migration paths are outlined in
+   [State Management and Migration Strategy](#state-management-and-migration-strategy)
+   but need validation before being declared production-ready.
+
+5. **OpenFGA store lifecycle**  Per-account FGA stores are referenced via
+   `Spec.FGA.Store.Id` but there is no documented backup or export procedure.
+   Before enabling OpenFGA removal on running deployments, a store export/import
+   mechanism should exist.
+
+6. **Roadmap**  Is component replaceability on the Platform Mesh roadmap?  Are
    there existing architectural decisions that affect feasibility?
 
 ## Non-Goals
@@ -376,4 +482,3 @@ excluded from a deployment without causing others to fail.
 - Backstage: https://backstage.io
 - Platform Mesh Operator: https://github.com/platform-mesh/platform-mesh-operator
 - kcp documentation: https://docs.kcp.io
-- BSI SYS.1.1(General Server): https://www.bsi.bund.de/SharedDocs/Downloads/DE/BSI/Grundschutz/IT-GS-Kompendium_Einzel_PDFs_2023/07_SYS_IT_Systeme/SYS_1_1_Allgemeiner_Server_Edition_2023.pdf?__blob=publicationFile&v=3
