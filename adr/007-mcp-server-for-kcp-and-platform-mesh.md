@@ -58,49 +58,51 @@ This option was selected because it provides a clean, Kubernetes-native API that
 ### Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        MCP Client (LLM Agent)                    │
-│                    (Claude, Copilot, etc.)                        │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │ MCP Protocol (stdio/SSE)
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                   kubernetes-mcp-server                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────────┐ │
-│  │ kcp toolset  │  │ core toolset│  │ workspace discovery      │ │
-│  │ (existing)   │  │ (pods, etc.)│  │ (NEW: SCAR integration)  │ │
-│  └──────┬──────┘  └──────┬──────┘  └────────────┬─────────────┘ │
-└─────────┼────────────────┼──────────────────────┼────────────────┘
-          │                │                      │
-          │ kubeconfig     │ kubeconfig            │ HTTPS
-          │ (per-workspace)│ (per-workspace)       │ (Bearer/Cert)
-          ▼                ▼                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                       kcp FrontProxy                             │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Path Routing:                                              │  │
-│  │  /clusters/{name}/*  → Shard (workspace resources)          │  │
-│  │  /services/access-vw → Access Virtual Workspace             │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│  Identity: X-Remote-User, X-Remote-Group, X-Remote-Extra-*      │
-└────────────┬──────────────────────────────┬──────────────────────┘
-             │                              │
-             ▼                              ▼
-┌────────────────────────┐   ┌─────────────────────────────────────┐
-│     kcp Shards          │   │    Access Virtual Workspace         │
-│  ┌──────────────────┐  │   │  ┌───────────────────────────────┐  │
-│  │ Workspace 1      │  │   │  │  RBAC Graph Controller        │  │
-│  │ Workspace 2      │  │   │  │  (watches CRB/RB across       │  │
-│  │ ...              │  │   │  │   shards, builds subject →    │  │
-│  │ Workspace N      │  │   │  │   LogicalCluster index)       │  │
-│  └──────────────────┘  │   │  └───────────────────────────────┘  │
-│                         │   │  ┌───────────────────────────────┐  │
-│                         │   │  │  SCAR REST Handler            │  │
-│                         │   │  │  POST /selfclusteraccessreview│  │
-│                         │   │  │  → {clusters, endpoints}      │  │
-│                         │   │  └───────────────────────────────┘  │
-│                         │   │                                     │
-└─────────────────────────┘   └─────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                     MCP Client (LLM Agent)                     │
+│                     (Claude, Copilot, etc.)                    │
+└───────────────────────────┬────────────────────────────────────┘
+                            │ MCP Protocol (stdio/SSE)
+                            ▼
+┌────────────────────────────────────────────────────────────────┐
+│                    kubernetes-mcp-server                       │
+│                                                                │
+│  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐  │
+│  │ kcp toolset  │ │ core toolset │ │ workspace discovery    │  │
+│  │ (existing)   │ │ (pods, etc.) │ │ (NEW: SCAR integr.)    │  │
+│  └──────┬───────┘ └──────┬───────┘ └───────────┬────────────┘  │
+│         │                │                     │              │
+└─────────┼────────────────┼─────────────────────┼──────────────┘
+          │ kubeconfig     │ kubeconfig          │ HTTPS
+          │ (per-ws)       │ (per-ws)            │ (Bearer/Cert)
+          ▼                ▼                     ▼
+┌────────────────────────────────────────────────────────────────┐
+│                       kcp FrontProxy                           │
+│                                                                │
+│  Path Routing:                                                 │
+│    /clusters/{name}/*  -> Shard (workspace resources)          │
+│    /services/access-vw -> Access Virtual Workspace             │
+│                                                                │
+│  Identity: X-Remote-User, X-Remote-Group, X-Remote-Extra-*     │
+└──────────────┬─────────────────────────────┬───────────────────┘
+               │                             │
+               ▼                             ▼
+┌──────────────────────────┐  ┌──────────────────────────────────┐
+│       kcp Shards         │  │   Access Virtual Workspace       │
+│                          │  │                                  │
+│  ┌────────────────────┐  │  │  ┌───────────────────────────┐   │
+│  │ Workspace 1        │  │  │  │ RBAC Graph Controller     │   │
+│  │ Workspace 2        │  │  │  │ (watches CRB/RB across    │   │
+│  │ ...                │  │  │  │  shards, builds subject   │   │
+│  │ Workspace N        │  │  │  │  -> LogicalCluster index) │   │
+│  └────────────────────┘  │  │  └───────────────────────────┘   │
+│                          │  │                                  │
+│                          │  │  ┌───────────────────────────┐   │
+│                          │  │  │ SCAR REST Handler         │   │
+│                          │  │  │ POST /selfclusteraccess.. │   │
+│                          │  │  │ -> {clusters, endpoints}  │   │
+│                          │  │  └───────────────────────────┘   │
+└──────────────────────────┘  └──────────────────────────────────┘
 ```
 
 ### Platform Mesh Extension
@@ -109,7 +111,7 @@ In Platform Mesh, an additional layer sits between the MCP server and the SCAR A
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│              Platform Mesh MCP Proxy                    │
+│              Platform Mesh MCP Proxy                   │
 │                                                        │
 │  1. Authenticate user (Bearer token / certificate)     │
 │  2. Query SCAR API for accessible workspaces           │
