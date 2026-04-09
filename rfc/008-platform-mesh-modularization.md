@@ -95,19 +95,19 @@ graph TD
         ExtMgr[Extension Manager]
     end
 
-    subgraph "Layer 2 — Accounts, Authorization & Authentication"
+    subgraph "Layer 2 — Authorization & Identity Infrastructure"
         KC[Keycloak]
         FGA[OpenFGA]
         ReBACWH[ReBAC AuthZ Webhook]
-        SecOp[security-operator]
-        AccOp[account-operator]
         IAM[iam-service]
     end
 
-    subgraph "Layer 1 — Control Plane &#40;always required&#41;"
+    subgraph "Layer 1 — Core &#40;always required&#41;"
         KCP[kcp]
         PMOp[PM Operator]
         Flux[Flux]
+        SecOp[security-operator]
+        AccOp[account-operator]
     end
 
     User --> Portal
@@ -139,15 +139,12 @@ graph TD
         ExtMgr[Extension Manager]
     end
 
-    subgraph "Layer 2 — Accounts"
-        SecOp[security-operator]
-        AccOp[account-operator]
-    end
-
-    subgraph "Layer 1 — Control Plane &#40;always required&#41;"
+    subgraph "Layer 1 — Core &#40;always required&#41;"
         KCP[kcp]
         PMOp[PM Operator]
         Flux[Flux]
+        SecOp[security-operator]
+        AccOp[account-operator]
     end
 
     ExtIdP[External IdP
@@ -172,15 +169,12 @@ e.g. Dex]
 graph TD
     User((User / API Client))
 
-    subgraph "Layer 2 — Accounts"
-        SecOp[security-operator]
-        AccOp[account-operator]
-    end
-
-    subgraph "Layer 1 — Control Plane &#40;always required&#41;"
+    subgraph "Layer 1 — Core &#40;always required&#41;"
         KCP[kcp]
         PMOp[PM Operator]
         Flux[Flux]
+        SecOp[security-operator]
+        AccOp[account-operator]
     end
 
     ExtIdP[External IdP
@@ -204,19 +198,23 @@ We propose a layered model for Platform Mesh components, inspired by the
 platform's own architectural thinking. Each layer depends on the layers inside
 it, but outer layers can be omitted without breaking inner ones.
 
-**Layer 1 — Control Planes (innermost, always required):**
+**Layer 1 — Core (always required):**
 - KCP (KCP-API-Server, LogicalCluster-Manager, VirtualWorkspaces)
 - Platform Mesh Operator (pm-operator)
 - Flux (hard runtime dependency: the Operator creates HelmRelease resources
   and expects Flux controllers to reconcile them) (ArgoCD in Future)
+- security-operator (always required; manages OpenFGA stores/models/tuples
+  when OpenFGA is active, or Kubernetes RBAC resources when it is not)
+- account-operator (always required; manages account lifecycle and
+  authorization state in OpenFGA or Kubernetes RBAC depending on
+  configuration)
 
-**Layer 2 — Accounts, Authorization, Authentication (optional as a whole and per component):**
-- security-operator (bootstraps Keycloak, manages OpenFGA stores/models/tuples)
-- account-operator (account lifecycle, writes account relationship tuples to OpenFGA)
-- iam-service (user queries, writes user role assignment tuples to OpenFGA)
+**Layer 2 — Authorization and Identity Infrastructure (optional per component):**
 - Keycloak (identity provider)
 - OpenFGA (authorization engine)
 - rebac-authorization-webhook
+- iam-service (user queries, user role assignment tuples; requires either
+  OpenFGA or Kubernetes RBAC backend)
 
 **Layer 3 — Portal, Extensibility, API Compositions (optional):**
 - OpenMFP Portal + GraphQL Gateway (kubernetes-graphql-gateway)
@@ -228,10 +226,10 @@ it, but outer layers can be omitted without breaking inner ones.
 **Outer layer — Provider-specific components (fully optional):**
 - resource-broker
 
-The key requirement is that disabling an outer layer leaves inner layers
+The key requirement is that omitting an outer layer leaves inner layers
 fully functional. A deployment with only Layer 1 is minimal but operational.
-A deployment with Layers 1 and 2 but without Layer 3 is headless but
-multi-tenant capable.
+Adding Layer 2 components enables managed identity and fine-grained
+authorization. Adding Layer 3 provides a portal experience on top.
 
 ### Single-Organization and Flat Account Mode
 
@@ -411,13 +409,12 @@ conforming implementation can satisfy:
 **Identity / OIDC interface:**
 - Provide a standards-compliant OIDC discovery endpoint
 - Issue JWTs that kcp can validate
-- Examples: Keycloak (default), Teleport, Dex, Okta, Azure AD, ADFS
+- Examples: Keycloak (default), Dex, Okta, Azure AD, ADFS
 
 **Authorization interface:**
 - Provide a webhook endpoint compatible with the Kubernetes authorization webhook
-  protocol, or integrate with kcp's native RBAC
-- Examples: OpenFGA (default), Teleport access policies, OPA, or native RBAC
-  (no external authorization engine)
+  protocol, or fall back to kcp-native RBAC
+- Examples: OpenFGA (default), Kubernetes RBAC (no external authorization engine)
 
 **Portal interface:**
 - Consume the Platform Mesh API (kcp workspaces, provider APIs) and present them
@@ -449,47 +446,40 @@ The Platform Mesh Operator must handle absent optional components gracefully:
 
 ### Packaging and Delivery
 
-The Platform Mesh must be delivered as an **OCM (Open Component Model) artifact**
-that can be deployed via the PlatformMesh-Operator. The parameterization of
-individual components (enabled/disabled, configuration overrides) must be
-expressible through the PlatformMesh custom resource.
+The Platform Mesh is delivered as an **OCM (Open Component Model) artifact**.
+The existing deployment path remains unchanged: operators configure the
+**PlatformMesh custom resource**, the **PlatformMesh-Operator** reconciles it,
+and the resulting **Helm values** are consumed via the OCM component.
 
-Within the OCM component, the actual toggle mechanism is an implementation detail.
-Options include:
-
-- **Helm values flags** (`keycloak.enabled: false`) low effort, existing pattern
-- **Kustomize components** composable overlays, GitOps-native
-
-What matters is that the outcome is the same: any optional component can be
-excluded from a deployment without causing others to fail.
+Component toggles (e.g. `values.keycloak.enabled: false`,
+`values.openfga.enabled: false`, `values.portal.enabled: false`) and
+configuration overrides (OIDC settings, scope parameterization) must be
+expressible through the PlatformMesh resource and propagated as Helm values
+to the respective sub-charts.
 
 ## Open Questions
 
-1. **Dependency audit**  Which Platform Mesh Operator controllers have hard
-   runtime dependencies on Keycloak and OpenFGA?  Is there an existing dependency
-   map, or would this need to be produced as a first step?
-
-2. **Interface definition**  Is there appetite for formally defining the OIDC,
+1. **Interface definition**  Is there appetite for formally defining the OIDC,
    authorization, and portal interfaces that alternative implementations must
    satisfy? Even informal documentation would be a useful starting point.
 
-3. **RBAC-only mode implementation**  The RBAC fallback when OpenFGA is absent
+2. **RBAC-only mode implementation**  The RBAC fallback when OpenFGA is absent
    is described in this RFC, but the exact implementation is open: is disabling
    the authorization webhook a kcp configuration change, a code change in the
    Platform Mesh Operator, or both?
 
-4. **Day-1 scope for runtime mutability**  Should the first release support
+3. **Day-1 scope for runtime mutability**  Should the first release support
    changing configuration variants on a running deployment, or is install-time
    selection sufficient initially? The migration paths are outlined in
    [State Management and Migration Strategy](#state-management-and-migration-strategy)
    but need validation before being declared production-ready.
 
-5. **OpenFGA store lifecycle**  Per-account FGA stores are referenced via
+4. **OpenFGA store lifecycle**  Per-account FGA stores are referenced via
    `Spec.FGA.Store.Id` but there is no documented backup or export procedure.
    Before enabling OpenFGA removal on running deployments, a store export/import
    mechanism should exist.
 
-6. **Roadmap**  Is component replaceability on the Platform Mesh roadmap?  Are
+5. **Roadmap**  Is component replaceability on the Platform Mesh roadmap?  Are
    there existing architectural decisions that affect feasibility?
 
 ## Non-Goals
@@ -499,12 +489,26 @@ excluded from a deployment without causing others to fail.
 - Breaking changes to existing Platform Mesh API or CRD schemas (additive changes
   to the PlatformMesh resource for component toggles and OIDC configuration are
   in scope)
-- Prescribing which alternative implementations are officially supported
+
+### Implementation Support Tiers
+
+Alternative implementations should be classified by their validation level.
+The following table captures the initial target state:
+
+| Component   | Tier 1 (Default, fully tested) | Tier 2 (Tested, supported)     | Tier 3 (Community, best-effort)     |
+|-------------|-------------------------------|-------------------------------|-------------------------------------|
+| Identity    | Keycloak                      | Dex                           | Okta, Azure AD, ADFS, others        |
+| Authorization | OpenFGA (ReBAC)             | Kubernetes RBAC (built-in)    | —                                   |
+| Portal      | OpenMFP                       | None (API-only)               | Backstage, custom                   |
+| GitOps      | Flux                          | —                             | ArgoCD                              |
+
+- **Tier 1:** Default out-of-the-box, covered by full E2E test suite
+- **Tier 2:** Actively tested in CI, documented configuration, supported
+- **Tier 3:** Known to work or community-contributed, not part of CI
 
 ## References
 
 - cert-manager disabling: https://github.com/platform-mesh/platform-mesh-operator/issues/504
-- Teleport OIDC documentation: https://goteleport.com/docs/reference/oidc/
 - Backstage: https://backstage.io
 - Platform Mesh Operator: https://github.com/platform-mesh/platform-mesh-operator
 - kcp documentation: https://docs.kcp.io
