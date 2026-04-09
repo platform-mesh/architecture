@@ -199,7 +199,7 @@ platform's own architectural thinking. Each layer depends on the layers inside
 it, but outer layers can be omitted without breaking inner ones.
 
 **Layer 1 — Core (always required):**
-- KCP (KCP-API-Server, LogicalCluster-Manager, VirtualWorkspaces)
+- kcp (kcp-API-Server, LogicalCluster-Manager, VirtualWorkspaces)
 - Platform Mesh Operator (pm-operator)
 - Flux (hard runtime dependency: the Operator creates HelmRelease resources
   and expects Flux controllers to reconcile them) (ArgoCD in Future)
@@ -226,10 +226,12 @@ it, but outer layers can be omitted without breaking inner ones.
 **Outer layer — Provider-specific components (fully optional):**
 - resource-broker
 
-The key requirement is that omitting an outer layer leaves inner layers
-fully functional. A deployment with only Layer 1 is minimal but operational.
-Adding Layer 2 components enables managed identity and fine-grained
-authorization. Adding Layer 3 provides a portal experience on top.
+The layers illustrate the dependency direction (outer depends on inner), but
+components within Layer 2 and Layer 3 can be toggled individually. For
+example, Keycloak can be removed while OpenFGA stays active, or the portal
+can be disabled while keeping the full authorization stack. All seven
+configuration variants listed above are first-class supported combinations,
+not just "everything" or "nothing".
 
 ### Single-Organization and Flat Account Mode
 
@@ -492,19 +494,20 @@ to the respective sub-charts.
 
 ### Implementation Support Tiers
 
-Alternative implementations should be classified by their validation level.
-The following table captures the initial target state:
+Which configuration variants are supported is defined in the
+[Supported Configuration Variants](#supported-configuration-variants) table
+above. When a component is *replaced* (not just disabled), the replacement
+implementation should be classified by its validation level:
 
-| Component   | Tier 1 (Default, fully tested) | Tier 2 (Tested, supported)     | Tier 3 (Community, best-effort)     |
-|-------------|-------------------------------|-------------------------------|-------------------------------------|
-| Identity    | Keycloak                      | Dex                           | Okta, Azure AD, ADFS, others        |
-| Authorization | OpenFGA (ReBAC)             | Kubernetes RBAC (built-in)    | —                                   |
-| Portal      | OpenMFP                       | None (API-only)               | Backstage, custom                   |
-| GitOps      | Flux                          | —                             | ArgoCD                              |
+| Tier | Definition | Examples |
+|------|-----------|----------|
+| **Tier 1** — Default | Ships out-of-the-box, covered by full E2E test suite | Keycloak, OpenFGA, OpenMFP, Flux |
+| **Tier 2** — Validated | Actively tested in CI, documented configuration | Dex (as external IdP) |
+| **Tier 3** — Community | Known to work or community-contributed, not part of CI | Okta, Azure AD, ADFS, Backstage, ArgoCD |
 
-- **Tier 1:** Default out-of-the-box, covered by full E2E test suite
-- **Tier 2:** Actively tested in CI, documented configuration, supported
-- **Tier 3:** Known to work or community-contributed, not part of CI
+This classification applies to alternative implementations only. Disabling
+a component entirely (e.g. deploying without Portal or without OpenFGA) is
+a supported configuration variant, not a support tier.
 
 ## References
 
