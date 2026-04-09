@@ -1,5 +1,9 @@
 # ADR 002: Fine-Grained Access Control for APIExport Binding
 
+| Status  | Approved   |
+|---------|------------|
+| Date    | 2026-03-26 |
+
 ## Context
 
 Today any APIExport can be bound in any workspace. With this feature we introduce fine-grained control on where APIs can be bound.
