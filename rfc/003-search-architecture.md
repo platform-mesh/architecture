@@ -135,15 +135,17 @@ spec:
 
   paused: false                  # suspend all indexing without deleting the index
 
-  # All fields are searchable by default (full-text).
-  # The following configure additional index behavior on top of that:
-  filterableFields:              # for exact-match filtering and faceting
+  # All field lists are auto-populated by the operator from the bound
+  # APIResourceSchemas.
+  defaultFields:                 # all schema fields (minus exclusions), for full-text search
+    - spec
+    - metadata
+  semanticFields:                # string-typed fields, for ML-based vector similarity search
+    - spec.displayName
+    - spec.description
+  filterableFields:              # scalar-typed fields, for exact-match filtering
     - spec.region
     - status.phase
-  semanticFields:                # for ML-based vector similarity search
-    - spec.description
-  excludedFields:                # fields completely excluded from the search
-    - spec.clusterInfo.ca
 
 status:
   indexName: pm-orgs-31e8jyvwx6iwfqkm-accounts
@@ -156,13 +158,16 @@ status:
 
 #### Field Configuration
 
-All fields present in a resource are indexed for full-text search by default. The `filterableFields` and `semanticFields` are opt-in additions on top of that default:
+`SearchIndex` resources are **auto-created and managed by the operator**. When a workspace binds to the search APIExport, the `APIBindingReconciler` reads the bound `APIResourceSchema` objects and populates the field lists automatically.
 
-| Field type | Purpose | Auto-populated | OpenSearch mapping |
+Fields present in a resource's schema are classified into three auto-populated lists:
+
+| Field type | Purpose | Auto-populated rule | OpenSearch mapping |
 |---|---|---|---|
-| *(all fields)* | Full-text search across every resource field that is not excluded | Yes, automatically | text |
-| `filterableFields` | Exact-match filtering and aggregations (facets) | No, must be configured | `keyword` |
-| `semanticFields` | ML-based semantic search over selected text fields | No, must be configured | OpenSearch `semantic` field type backed by the configured ML model |
+| `defaultFields` | Full-text search across every resource field that is not excluded | all top-level schema fields minus excluded fields | text |
+| `semanticFields` | ML-based semantic search over text fields | all fields with schema type `string` (subset of defaultFields) | OpenSearch `semantic` field type backed by the configured ML model |
+| `filterableFields` | Exact-match filtering and aggregations (facets) | all fields with scalar schema types | `keyword` |
+
 
 `semanticFields` are implemented using OpenSearch's `semantic` field type. The search-operator creates explicit semantic mappings for each configured field and supplies the configured `OPENSEARCH_SEMANTIC_MODEL_ID`. OpenSearch then manages the backing semantic metadata and embedding storage internally.
 
@@ -264,7 +269,7 @@ type PermissionTuple struct {
 
 ### Completed
 
-- `SearchIndex` CRD with spec/status schema, field configuration (filterableFields, semanticFields), paused flag
+- `SearchIndex` CRD with spec/status schema, auto-populated field configuration (defaultFields, filterableFields, semanticFields), paused flag
 - Search provider via `search.platform-mesh.io` APIExport with permission claims
 - `SearchIndexReconciler` — OpenSearch index lifecycle management
 - `APIBindingReconciler` — per-resource SearchIndex auto-provisioning
