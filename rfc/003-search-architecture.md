@@ -162,7 +162,9 @@ All fields present in a resource are indexed for full-text search by default. Th
 |---|---|---|---|
 | *(all fields)* | Full-text search across every resource field that is not excluded | Yes, automatically | text |
 | `filterableFields` | Exact-match filtering and aggregations (facets) | No, must be configured | `keyword` |
-| `semanticFields` | ML-based vector similarity search | No, must be configured | `dense_vector` |
+| `semanticFields` | ML-based semantic search over selected text fields | No, must be configured | OpenSearch `semantic` field type backed by the configured ML model |
+
+`semanticFields` are implemented using OpenSearch's `semantic` field type. The search-operator creates explicit semantic mappings for each configured field and supplies the configured `OPENSEARCH_SEMANTIC_MODEL_ID`. OpenSearch then manages the backing semantic metadata and embedding storage internally.
 
 #### Index Naming
 
@@ -274,7 +276,7 @@ type PermissionTuple struct {
 ### Planned
 
 1. **Search Service** — REST API with FGA post-filtering, query transformation, result ranking
-2. **Semantic search** — activate dense_vector indexing for configured `semanticFields`
+2. **Semantic search** — configure OpenSearch `semantic` field mappings for selected `semanticFields` and query them with `neural` search using the configured ML model.
 3. **Pre-filtering optimization** — add account-level filters to OpenSearch queries to reduce FGA batch check size
 4. **Index freshness monitoring** — SLO definition, reconciliation jobs to detect/repair index drift
 5. **Production hardening** — auth, OpenSearch persistence, backup/restore, replica configuration
