@@ -151,7 +151,6 @@ spec:
 
 status:
   indexName: pm-orgs-31e8jyvwx6iwfqkm-accounts
-  documentCount: 1482
   lastSyncTime: "2026-04-20T10:00:00Z"
   conditions:
     - type: Ready
