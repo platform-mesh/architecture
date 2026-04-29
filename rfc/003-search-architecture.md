@@ -6,7 +6,7 @@ Date: 2026-04-20 (updated from 2026-02-17)
 
 ## Summary
 
-This RFC describes the search architecture for Platform Mesh that enables full-text search, exact-match filtering, and semantic search across kcp resources with fine-grained authorization using OpenFGA. The architecture exposes search as a kcp provider offering the APIExport `search.platform-mesh.io` and the `SearchIndex` custom resource managed by the `search-operator`. One `SearchIndex` is created per organization per indexed resource type, living in the `root:orgs` workspace. The search-operator watches kcp resources across all workspaces that bind the search export and indexes them into dedicated per-org-per-resource OpenSearch indexes. Default APIBindings ensure that resources can be discovered across workspaces.
+This RFC describes the search architecture for Platform Mesh that enables full-text search, exact-match filtering, and semantic search across kcp resources with fine-grained authorization. The architecture exposes search as a kcp provider offering the APIExport `search.platform-mesh.io` and the `SearchIndex` custom resource managed by the `search-operator`. One `SearchIndex` is created per organization per indexed resource type, living in the `root:orgs` workspace. The search-operator watches kcp resources across all workspaces that bind the search export and indexes them into dedicated per-org-per-resource OpenSearch indexes. Default APIBindings ensure that resources can be discovered across workspaces.
 
 ## Context and Problem Statement
 
@@ -21,7 +21,7 @@ Platform Mesh did not provide advanced search capabilities (partial word search,
 
 - Provide a generic, reusable search architecture integrated with Platform Mesh
 - Enable per-organization search indexes with proper isolation
-- Leverage OpenFGA for fine-grained authorization on search results
+- Leverage existing authorization functionality for fine-grained filtering of search results
 - Support declarative, configurable resource tracking
 - Expose search through Platform Mesh as a standard provider (APIExport)
 - Enable semantic search via configurable per-field vector indexing
@@ -59,8 +59,8 @@ graph TB
     end
 
     OpenSearch["OpenSearch<br/>per-org, per-resource index"]
-    SearchService["Search Service<br/>REST API + FGA post-filtering"]
-    FGA["OpenFGA<br/>batch permission checks"]
+    SearchService["Search Service<br/>REST API + post-filtering"]
+    FGA["Batch permission checks"]
     Clients["UI / API Clients"]
 
     APIExport -->|endpoint slice| SearchOperator
@@ -81,8 +81,6 @@ graph TB
     style kcp fill:#e1f5ff,stroke:#333
     style SearchOperator fill:#fff3e0,stroke:#333
 ```
-
-**Note**: [Adr-06](../adr/adr-06-search-implementation.md) mentions a Search Service with FGA post-filtering as one option.
 
 ## Components
 
@@ -206,7 +204,6 @@ Each `SearchIndex` is named `{indexPrefix}-{orgClusterID}-{resourcePlural}` and 
 One reconciler per configured resource type (e.g., `core.platform-mesh.io/v1alpha1/Account`). Each:
 
 1. Watches the target resource type across all bound workspaces
-2. Builds a `ResourceDocument` enriched with org/account context and FGA permission tuples
 3. Indexes the document into the matching OpenSearch index (resolved via the `SearchIndex` for that org and resource type)
 4. Removes the document from OpenSearch when the resource is deleted
 
@@ -230,7 +227,6 @@ workspace_path      — full kcp workspace path
 organization_id / organization_name
 account_id / account_name
 
-fga_object          — OpenFGA object reference, e.g. "core_platform-mesh_io_account:ID/name"
 permissions         — []PermissionTuple stored at index time (user, relation, object)
 
 labels / annotations — flat_object
@@ -240,18 +236,6 @@ payload_raw_json    — full raw JSON (stored, not indexed; for retrieval)
 payload_text        — full text representation (indexed for full-text search)
 
 created_at / updated_at
-```
-
-#### Permission Tuples at Index Time
-
-FGA permission tuples are embedded in every document at indexing time, derived from the resource's FGA object and its hierarchy context. This avoids runtime FGA lookups for every candidate result during search.
-
-```go
-type PermissionTuple struct {
-    User     string  // e.g. "user:alice", "role:admin#assignee"
-    Relation string  // e.g. "member", "owner", "viewer"
-    Object   string  // matches fga_object of the document
-}
 ```
 
 ## Configuration
@@ -281,9 +265,9 @@ type PermissionTuple struct {
 
 ### Planned
 
-1. **Search Service** — REST API with FGA post-filtering, query transformation, result ranking
+1. **Search Service** — REST API with post-filtering, query transformation, result ranking
 2. **Semantic search** — configure OpenSearch `semantic` field mappings for selected `semanticFields` and query them with `neural` search using the configured ML model.
-3. **Pre-filtering optimization** — add account-level filters to OpenSearch queries to reduce FGA batch check size
+3. **Pre-filtering optimization** — add account-level filters to OpenSearch queries to reduce batch check size
 4. **Index freshness monitoring** — SLO definition, reconciliation jobs to detect/repair index drift
 5. **Production hardening** — auth, OpenSearch persistence, backup/restore, replica configuration
 
@@ -294,7 +278,5 @@ type PermissionTuple struct {
 
 ## Related Documents
 
-- [ADR-06: Search Implementation in Platform Mesh](../adr/adr-06-search-implementation.md)
-- OpenFGA Documentation
 - OpenSearch Documentation
 - kcp APIExport / Permission Claims Documentation
