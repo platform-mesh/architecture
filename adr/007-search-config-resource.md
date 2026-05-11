@@ -1,4 +1,4 @@
-# ADR 006: SearchConfig Resource for Provider-Defined Field Indexing
+# ADR 007: SearchConfig Resource for Provider-Defined Field Indexing
 
 | Status  | Proposed   |
 |---------|------------|
