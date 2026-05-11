@@ -61,6 +61,14 @@ Known high-impact consumers:
 | platform-mesh/generic-resource-ui | `buildVersionedTypeName()` and mutation variable construction need full versioned prefix + `_Input` |
 | platform-mesh/marketplace-ui | Schema regeneration + one input type reference |
 
+### Remaining Collision Risk
+
+This approach eliminates collisions caused by kind-level ambiguity and input suffix overlap, but does not guarantee 100% collision freedom. Kubernetes API groups permit characters (`.`, `-`) that have no equivalent in GraphQL identifiers — the PascalCase conversion is lossy. For example, `acme.cert-manager.io` and `acme.cert.manager.io` both map to `AcmeCertManagerIo`, producing identical prefixes for distinct groups.
+
+In practice, such groups are unlikely to coexist in the same cluster, and the chosen scheme covers the vast majority of real-world collision scenarios. However, a fully automated, universally collision-free mapping between Kubernetes naming and GraphQL naming is structurally impossible given the difference in allowed character sets.
+
+A future iteration may address the remaining edge cases by exposing additional control over generated type names — for example, through a listener-level introspection mechanism that lets CRD authors declare explicit GraphQL type name overrides.
+
 ## Considered Options
 
 ### Option A: Unconditional Group-Version Prefix (chosen)
