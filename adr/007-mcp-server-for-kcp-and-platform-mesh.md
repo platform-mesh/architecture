@@ -213,6 +213,26 @@ Scale testing, Warrants/Scopes support in the RBAC provider, workspace change no
 
 A hackathon PoC validated the end-to-end MCP flow against a local kcp setup with agentgateway + Keycloak in front of `kubernetes-mcp-server`. The gateway-side pieces (OIDC, dynamic client registration, bearer passthrough, MCP session handling) work as expected. The PoC also identified the gap this ADR closes: the MCP server used a privileged kubeconfig and did not use the authenticated user's identity for scoping. See [`mcp-poc-findings.md`](./mcp-poc-findings.md) for the detailed writeup.
 
+### Threat model and known limitations: agent delegation
+
+SCAR authenticates a single caller identity per request. In the deployments this ADR targets, that caller is sometimes a human user and sometimes an AI agent (an MCP server, a copilot CLI, an autonomous coding agent) that the user has handed a token to. The protocol can't tell them apart today, and that creates a real exposure: an agent acting on a user's behalf inherits the user's full authority, with no independent scope for "what is this agent allowed to do" versus "what can this user do."
+
+An AI coding agent given a user's valid token, under "be persistent" instructions, exhaustively explores alternative paths to data the user has access to but that the agent shouldn't expose to a third-party model. The defense in that work is [RFC 8693 — OAuth 2.0 Token Exchange](https://datatracker.ietf.org/doc/html/rfc8693) combined with policy intersection — the request carries `sub` (user) and `azp` (agent), and the policy engine grants only `user.scopes ∩ agent.capabilities`.
+
+This ADR scopes that concern out of the initial MVP for the following reasons:
+
+- kcp's authorization is user-identity-based and does not natively understand `azp`. Adding on-behalf-of semantics to kcp itself would be a substantial upstream change, out of scope here.
+- SCAR can grow agent-awareness incrementally without that upstream change. The auth resolver chain is the natural insertion point: a future resolver can extract an agent identity (header, exchanged-token claim, SPIFFE SVID) alongside the user identity, and SCAR can return `user.workspaces ∩ agent.capabilities`.
+- The design explicitly keeps that path open: the auth chain is composable, the SCAR response shape doesn't need to change, and the agent capability registry is a deployment-time concern rather than a kcp concern.
+
+Concrete future work, in rough order of effort:
+
+1. **Header-based agent identification** (e.g. `X-Agent-Identity`) recorded in audit logs alongside the user identity. Observability only — no enforcement.
+2. **Capability filter on SCAR responses,** computed from a configured per-agent capability set. Filters the user's workspaces before they leave the access VW.
+3. **SPIFFE workload IDs and RFC 8693 token exchange** for agents. Production-grade on-behalf-of with audit-log separation throughout the stack.
+
+What this ADR explicitly does NOT solve: an agent handed a user's raw token that bypasses SCAR entirely by talking to kcp directly. That requires either a network policy chokepoint forcing agent traffic through the access VW, or kcp itself becoming agent-aware. Both are explicitly out of scope here; this ADR establishes the chokepoint, not the network policy.
+
 ### References
 
 - [kcp Virtual Workspace Architecture](https://github.com/kcp-dev/kcp/tree/main/staging/src/github.com/kcp-dev/virtual-workspace-framework/architecture.md) — Design patterns for kcp Virtual Workspaces.
@@ -223,3 +243,4 @@ A hackathon PoC validated the end-to-end MCP flow against a local kcp setup with
 - [ADR 003: User Identifier Claim](003_user-identifier-claim.md) — User identity propagation across the stack; dependency for SCAR and FGA intersection.
 - [kcp FrontProxy documentation](https://docs.kcp.io/kcp/main/concepts/front-proxy/) — Identity propagation and path routing used by the Access VW.
 - [kcp Authorization documentation](https://docs.kcp.io/kcp/main/concepts/authorization/) — Multi-stage RBAC chain referenced by the RBAC access provider.
+- [RFC 8693 — OAuth 2.0 Token Exchange](https://datatracker.ietf.org/doc/html/rfc8693)
