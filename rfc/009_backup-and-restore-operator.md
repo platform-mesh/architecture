@@ -305,6 +305,58 @@ POC success criteria — all running on the [helm-charts `local-setup`](https://
 4. **No-coordination consistency**: run continuous traffic against the platform during backup capture; restore; run the repair subroutine; quantify orphan tuple count and any other observed divergence. **This is the gating result for whether ADR 008's "no admission freeze" assumption holds.**
 5. **Multi-shard restore**: take a backup of a ≥2-shard platform, tear down, restore. Confirm workspaces partitioned across shards return to their correct shards, APIBindings still resolve, and cross-shard references survive. Failure on any single shard during restore must fail the `PlatformRestore` cleanly (no partial state).
 
+## Implementation Tickets
+
+Twelve tickets, organised into four tracks. After Track 1 lands (foundation), Track 2 runs **fully parallel** (seven independent component drivers). Track 3 stitches them together and depends on most of Track 2. Track 4 validates.
+
+```
+                ┌───── T3  Velero lifecycle ─────────────┐
+                ├───── T4  etcd-druid drivers ───────────┤
+T1 ──┐          ├───── T5  CNPG drivers ─────────────────┤
+     ├─►  ──────┼───── T6  Velero CR drivers ────────────┼───►  T10 PlatformBackup ctrl ──┐
+T2 ──┘          ├───── T7  Topology capture + S3 writer ─┤    T11 PlatformRestore ctrl ──┼─► T12 E2E
+                ├───── T8  Topology validator ───────────┤                               │
+                └───── T9  Cross-tier repair ────────────┘                               │
+                                                                                         ▼
+                                                                                  Track 4 validation
+```
+
+### Track 1 — Foundation (parallel, must land first)
+
+- **T1: Bootstrap `platform-mesh/backup-operator` + API types.** New repo. Go module, controller-runtime + [`platform-mesh/subroutines`](https://github.com/platform-mesh/subroutines) scaffolding, CI, Dockerfile, minimal Helm chart, CODEOWNERS. `PlatformBackup` / `PlatformRestore` Go types under `api/v1alpha1/`, CRD generation via `controller-gen`, sample manifests under `config/samples/`. No reconcile logic. **Size: M.**
+- **T2: `topology.json` schema v1alpha1 + ConfigMap projection + Go validator library.** JSON Schema document(s) embedded in the operator binary, projected into `backup-topology-schemas` ConfigMap at startup, Go library that reads schemas from the ConfigMap and validates/marshals topology documents. Unit tests on schema round-trip. **Size: S.**
+
+### Track 2 — Component drivers (fully parallel after Track 1)
+
+Each ticket is independently shippable, owns its own envtest setup with the relevant upstream CRDs installed, and exposes a `Subroutine` interface from `platform-mesh/subroutines`.
+
+- **T3: Velero lifecycle subsystem.** `internal/velero/` reconciler: ensure Velero CRDs, server `Deployment`, node-agent `DaemonSet`, and a `BackupStorageLocation` derived from `PlatformBackup.spec.storage`. Pin Velero version via Go vendor. Upgrade tests against two Velero versions. **Depends on: T1. Size: M.**
+- **T4: etcd-druid capture + restore drivers.** Discover all `Etcd` CRs in the platform namespace, trigger on-demand full snapshot via the etcdbr annotation, watch until snapshot key reported. Restore-side: recreate `Etcd` CR with restore directive pointing at a recorded key. Per-shard fan-out logic. **Depends on: T1. Size: M.**
+- **T5: CNPG capture + restore drivers.** Create on-demand `Backup` CR per CNPG `Cluster`, watch until `Succeeded`. Restore-side: create new `Cluster` with `spec.bootstrap.recovery` referencing the source `barmanObjectStore`. **Depends on: T1. Size: M.**
+- **T6: Velero Backup + Restore CR drivers.** Build the `includedResources` list (hard-coded POC inventory), create Velero `Backup` / `Restore` CRs, watch to terminal state. **Depends on: T1 (also T3 for the BSL contract). Size: S.**
+- **T7: Topology capture subroutine + S3 manifest writer.** Read `Etcd`, CNPG `Cluster`, security-operator `Store`/`AuthorizationModel` CRs, compute digests, assemble `topology.json` and `index.json`, PUT to S3 via `minio-go`. **Depends on: T1, T2. Size: M.**
+- **T8: Topology validator subroutine.** Fetch `topology.json` from S3, compute target-cluster digests, compare under `Strict`, surface mismatches as a structured condition. **Depends on: T1, T2. Size: S.**
+- **T9: Cross-tier repair subroutine.** Wait for security-operator readiness, list OpenFGA tuples whose `originClusterID/name` no longer resolves on the target cluster, sweep (dry-run by default; opt-in deletion via `PlatformRestore.spec.repair.delete`). Report counts to status. **Depends on: T1. Size: M.**
+
+### Track 3 — Controller wiring (parallel pair after Track 2 components land)
+
+- **T10: `PlatformBackup` controller wiring.** Chain T7 → (T4 + T5 + T6 parallel) → T7 manifest write, status aggregation, conditions per subroutine, failure semantics. **Depends on: T3, T4, T5, T6, T7. Size: M.**
+- **T11: `PlatformRestore` controller wiring.** Sequential chain: T8 (validate) → T4 (etcd) → T5 (cnpg) → T6 (velero) → T9 (repair). All-or-nothing failure semantics. **Depends on: T4, T5, T6, T8, T9. Size: M.**
+
+### Track 4 — Validation (last)
+
+- **T12: End-to-end test suite on Kind quick-start.** Covers all five scenarios in the Test Plan, including the gating no-coordination consistency run and multi-shard round-trip. Lives in `test/e2e/` with a `task e2e` entrypoint. **Depends on: T10, T11. Size: L.**
+
+### Suggested initial assignment
+
+Three people can run the POC in parallel after T1+T2 (≈1–2 days of foundation) lands:
+
+- **Person A** picks up T3 + T6 (Velero, both lifecycle and CR drivers — keeps Velero knowledge in one head) → T10.
+- **Person B** picks up T4 + T5 (etcd-druid and CNPG drivers — both are "drive upstream CRs and watch") → T11.
+- **Person C** picks up T2 → T7 + T8 + T9 (topology and repair — the genuinely novel surface) → T12.
+
+This gets seven Track-2 tickets in flight at once with minimal cross-blocking.
+
 ## Open Questions
 
 - What is the minimum useful set of CRDs the Velero subroutine should include in the POC? Driven by what the security-operator cannot re-derive — needs a concrete inventory.
