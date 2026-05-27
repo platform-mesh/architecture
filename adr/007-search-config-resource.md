@@ -90,6 +90,14 @@ This means a provider only needs to declare the **exceptions** to the default fu
 
 The SearchConfig resource is stored in the **provider workspace**, alongside the APIResourceSchema it configures. This follows the pattern established in RFC-004 where provider configuration is co-located with provider resources.
 
+#### SearchConfig Binding in Provider Workspaces
+
+To create `SearchConfig` objects in a provider workspace, that workspace must have `search.platform-mesh.io` bound (so the `SearchConfig` CRD is available). This raises a concern: the search-operator watches APIBindings to discover which workspaces to index — could binding `search.platform-mesh.io` in a provider workspace accidentally cause it to be treated as a consumer workspace?
+
+This conflict does not arise because the search-operator only indexes resources in **org workspaces** (under `:root:orgs`). The `APIBindingReconciler` resolves the org workspace from the binding's `status.APIExportClusterName` and creates `SearchIndex` resources there. Provider workspaces are never the target of indexing — they are only read as the source of `SearchConfig` and `APIResourceSchema` objects via the export client.
+
+To make `SearchConfig` objects available for creation in a provider workspace, the provider workspace binds `search.platform-mesh.io` accepting only the `logicalclusters` claim (required for KCP workspace access). This is a minimal binding that grants CRD availability without triggering any indexing behavior.
+
 ### How the Search-Operator Reads SearchConfig
 
 The `APIBindingReconciler` is extended with a new step:
@@ -181,7 +189,7 @@ The search-operator validates SearchConfig on read:
 
 1. **Schema cross-reference**: All field paths in `excludedFields`, `semanticFields`, and `exactFields` must exist in the referenced APIResourceSchema. If a field is referenced but does not exist, set `status.conditions[SchemaValid]=False`.
 2. **No overlap**: A field cannot appear in more than one list. If overlap is detected, the highest-priority list wins (`excludedFields` > `exactFields` > `semanticFields`).
-3. **Semantic field type check**: Fields listed in `semanticFields` should be of type `string` in the schema. Non-string fields in semanticFields produce a warning condition.
+3. **Semantic field type check**: The search-operator does not validate field types against the APIResourceSchema. The value at the declared path is passed as-is to the embedding model, which requires text input. Providers are responsible for only declaring fields whose runtime values produce meaningful text. This includes plain strings, but also object subtrees or arrays whose content is text-based.
 
 ## Consequences
 
