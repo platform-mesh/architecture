@@ -1,2 +1,2 @@
 # Default code owners
-* @platform-mesh/tsc
+* @platform-mesh/kube @platform-mesh/tsc
