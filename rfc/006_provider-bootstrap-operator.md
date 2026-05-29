@@ -83,11 +83,13 @@ kind: Provider
 metadata:
   name: wildwest
 spec:
+  providerKubeconfigSecret:
+    name: my-secret-name
+    namespace: my-secret-namespace
+    key: kubeconfig
   hostOverride: "https://frontproxy.platform-mesh-system:8443" # optional
 status:
   phase: Ready
-  kubeconfigSecretRef:
-    name: wildwest-kubeconfig  # Secret created in this workspace
 ```
 
 ### Example: ManagedProvider (runtime-level, full lifecycle)
