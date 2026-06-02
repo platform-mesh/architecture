@@ -42,6 +42,7 @@ An RFC-scoped POC answers these before the operator's public API hardens.
 ### Out of Scope (deferred)
 
 - Selective workspace / tenant restore.
+- **Per-object backup and restore** — the operator does not back up or restore individual KRM objects (a single `Workspace`, `Account`, CR instance, OpenFGA tuple, Keycloak user, etc.). Granularity is the platform; recovering a single object is a user-level concern handled outside this operator.
 - Cluster-ID remapping (ADR 008 assumes IDs preserved; prior art exists if proven needed later).
 - Encryption / KMS surface (CNPG and Velero handle it natively when adopters need it).
 - Backup of the host cluster's own control plane (operators, RBAC, Helm releases).
