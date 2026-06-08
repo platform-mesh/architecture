@@ -2,7 +2,7 @@
 
 ## Context and Problem Statement
 
-Currently for provider's API Platform Mesh generates AuthorizationModel resource with default relations within the kubernetes. For an example data provider authorization model looks like that
+Currently for provider's API Platform Mesh generates AuthorizationModel resource with default relations within the Kubernetes. For example, an AuthorizationModel for example-data provider looks like this:
 
 ```
 module httpbins
@@ -30,7 +30,7 @@ type orchestrate_platform-mesh_io_httpbin
     define get_iam_users: member
 ```
 
-And it's not flexible right now. With this feature we want to introduce the ability for provider to add their own relations and roles for an API provider introduces. It should supprt next functionality:
+And it's not flexible right now. With this feature we want to introduce the ability for providers to add their own relations and roles for an API they introduce. It should support the following functionality:
 
 * Alter/overwrite the auto-generated relations of a resource
 * Give the possibility to define new relations
@@ -39,12 +39,12 @@ And it's not flexible right now. With this feature we want to introduce the abil
 ## Decision
 1. Introduce a CRD which will be responsible for extending/overwriting relations which are defined in AuthorizationModel
 2. CRs of this CRD will be owned by provider and will be created in provider's workspace alongside of the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider's resources.
-3. Provider cannot owerwrite relations for types in OpenFGA which he doesn't own. For example provider cannot overwrite relations for an API of another provider, or for default kubernetes resources
+3. Provider cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
 
 ## Flow of work
 1. Provider creates ProviderPermissions resource in provider's workspace. It might happen as at the moment when AuthorizationModel already exists or after it
-2. Security-operator reconciles ApiBinding resource when somebody binds provider's API. At this moment security-operator generates AuthorizationModel resources based on binded `ApiResourceSchema` resources. At this moment security-operator will check if there defined `ProviderPermissions` resource and if it's so, security-operator will merge relations from `ProviderPermissions` and default `AuthorizationModel`
-3. When `AuthorizationModel` is written into the cluster, store reconciliation will be triggered and updates `AuthorizationModel` will reach OpenFGA
+2. Security-operator reconciles ApiBinding resource when somebody binds provider's API. At this moment security-operator generates AuthorizationModel resources based on bound `ApiResourceSchema` resources. At this moment security-operator will check if there is a defined `ProviderPermissions` resource and if so, security-operator will merge relations from `ProviderPermissions` and the default `AuthorizationModel`.
+3. When `AuthorizationModel` is written into the cluster, store reconciliation will be triggered and the updated `AuthorizationModel` will reach OpenFGA.
 
 ```mermaid
 ---
@@ -53,6 +53,7 @@ config:
   themeVariables:
     fontSize: 20px
     fontFamily: arial
+    background: "#ffffff"
   layout: fixed
 ---
 flowchart LR
@@ -93,7 +94,7 @@ flowchart LR
 ```
 
 ## Open questions
-1. should we allow provider to add his roles into existing resources and into the account or they operate over only their own API and in this case security-operator should be in charge of properly integrate new roles? 
+1. Should we allow providers to add their roles into existing resources and into the account, or should they operate only over their own API? In the latter case, security-operator should be in charge of properly integrating new roles. 
 
 ### OpenFGA DSL Syntax
 
@@ -117,7 +118,7 @@ Where `<relation_definition>` can include:
 | `[user] but not blocked` | Exclusion — must satisfy the first condition and NOT the second (Schema 1.1+). | Logical NOT |
 | `[user with condition_name]` | Conditional — direct assignment subject to a context condition evaluating to `true` (Schema 1.1+). | ABAC / Conditional |
 
-A lot of options of defining the relation makes it hard to propose a typed way of defining relation
+The variety of options for defining relations makes it hard to propose a typed way of defining them.
 
 ### ProviderPermissions Resource Definition
 
@@ -142,7 +143,9 @@ spec:
       displayName: Admin
       description: Administrative access with elevated permissions.
 
-  # OpenFGA types and their relations. Type name match the type name from AuthorizationModel. Relatations section represents relations which extend default AuthorizationModel or override relations from it.
+  # OpenFGA types and their relations. Type name matches the type name from AuthorizationModel. 
+  # Relations section represents relations which extend the default AuthorizationModel or override 
+  # relations from it.
   types:
     - name: orchestrate_platform-mesh_io_httpbin
       relations:
@@ -174,7 +177,7 @@ The operator must validate that a provider can only define permissions for resou
 
 Validation rules:
 - The type names declared in `spec.types[].name` must correspond to API resources exposed by the referenced `apiExportRef`
-- The validation webhook rejects any `ProviderPermissions` CR that attempts to define types not owned by the provider. Or operator may skip types configured in ProviderPermissions resource which are not matching ApiResourceSchema resources from ApiExport
+- The validation webhook rejects any `ProviderPermissions` CR that attempts to define types not owned by the provider. Alternatively, the operator may skip types configured in the ProviderPermissions resource which do not match ApiResourceSchema resources from the ApiExport.
 
 ### Override Behavior
 
