@@ -122,6 +122,8 @@ status:
     - type: RelationsValid
       status: "True"
       message: "All relations parsed successfully"
+    # This status is specificly important because this is how Provider can see 
+    # if an AuthorizationModel was generated fine or there's an error due to PP resource
     - type: AuthorizationModelIsGenerated
       status: "False"
       message: "Failed to generate AuthorizationModel due to relations duplication"
@@ -152,7 +154,13 @@ spec:
         admin: "[user] or owner"
         scan: "[user] or member"
 ```
-This resource will add 3 new relations into OpenFGA AuthorizationModel schema.
+
+This resource will add 3 new relations into OpenFGA AuthorizationModel schema:
+```
+    define codeviewer: [user] or member
+    define admin: [user] or owner
+    define scan: [user] or member
+```
 
 ### 1.2 Add new permissions with new roles
 ```yaml
@@ -171,6 +179,7 @@ spec:
           displayName: Code Viewer
           description: Can view code and related resources.
           definition: "[role#assignee] or owner"  # optional as relation definition is needed only for OpenFGA
+                                                  # and in RBAC mode it will not needed
 
   permissions:
     orchestrate_platform-mesh_io_httpbin:
@@ -181,13 +190,16 @@ spec:
         patch: ""
         watch: ""
       additionalPermissions:
-        admin: "[user] or owner"  # also a user can define here a role/relation here, but it will not be shown on the UI
+        admin: "[user] or owner"  # also a user can define here a role-relation here, but it will not be shown on the UI
+
         approve: "codeviewer or owner"  # here codeviewer is a relation as well, and provider needs to define what is the codeviewer.
                                         # basically it's a role in RBAC system, and 'role' relation in ReBAC system.
                                         # Provider can specify the roles relations in role: section
 ```
 
 ### 2. Change default permissions
+To change default permissions-relations in the generated AuthorizationModel, provider has `defaultPermissions` section. Currently we allow override only of 5 default kubernetes verbs: `get`, `update`, `delete`, `patch`, `watch`. From OpenFGA perspective provider can write any relation instead of the default one. From RBAC perspective provider can use this for role name override.
+
 ```yaml
 apiVersion: core.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
@@ -225,7 +237,7 @@ spec:
 roles:
   - groupResource: orchestrate.platform-mesh.io.httpbin
     roles:
-      - id: codeviewer  # relation/role name. In OpenFGA world it will stand for define <relation_name>: ...
+      - id: codeviewer  # relation/role name. In OpenFGA mode it will stand for define <relation_name>: ...
         displayName: Code Viewer  # provider can specify how the role will be shown on the UI
         description: Can view code and related resources.  # provider can explain what the role does here
         definition: "[role#assignee] or owner"  # (optional) for OpenFGA it's essential as in OpenFGA role is just a relation.
@@ -282,29 +294,27 @@ The grahql mutation which can assign user a role to a resource type
 
 ### Validation
 
-The operator must validate that a provider can only define permissions for resources it owns. This prevents a malicious or misconfigured provider from overwriting permissions for another provider's or system resources.
+The validation webhook must validate that a provider can only define permissions for resources it owns and ideally also validate defined permissions and roles before applying the resource into the clsuter. This prevents a malicious or misconfigured provider from overwriting permissions for other provider's or system resources and improves user's experience.
 
-Validation rules:
-- The type names declared in `spec.types[].name` must correspond to API resources exposed by the referenced `apiExportRef`
-- The validation webhook rejects any `ProviderPermissions` CR that attempts to define types not owned by the provider. Alternatively, the operator may skip types configured in the ProviderPermissions resource which do not match ApiResourceSchema resources from the ApiExport.
-
-### Override Behavior
-
-When relations defined in a `ProviderPermissions` resource match existing permissions in the `AuthorizationModel` resource, the operator uses the relations from `ProviderPermissions` as the source of truth. This allows providers to customize the default permission model for their resources.
-
-### Roles Metadata
-
-The `roles` section in `ProviderPermissions` exists to support UI and iam-service integration. While OpenFGA only needs the relation definitions in the `types` section, the UI and iam-service require additional metadata to provide a complete role management experience.
-
-This separation allows:
-- **UI** to display human-readable role names and descriptions in role assignment dialogs
-- **iam-service** to enumerate available roles for a provider's resources and expose them via API
-- **Providers** to define their own custom roles with meaningful descriptions that end users can understand
-
-The `id` field must match a relation name defined in the `types` section. The validation webhook validates this correspondence and reports mismatches in the status conditions.
-
-When a provider introduces a new custom role (e.g., `reviewer`), the operator must also add this role to both the `core_platform-mesh_io_account` and `core_namespace` type schemas in the authorization model. This is required because roles are assigned at the account level and `core_namespace` serves as the parent for provider-generated APIs — both types need to know about all available roles that can be inherited down the hierarchy.
+Potential validation rules:
+- The resource names declared in `spec.permissions` keys (e.g., `orchestrate.platform-mesh.io.httpbin`) must correspond to API resources exposed by the referenced `apiExportRef`
+- The `groupResource` values in `spec.roles` must match API resources managed by the provider
 
 ### Finalization
 
-When a `ProviderPermissions` CR is deleted, the operator will just regenerate AuthorizationModel without relations from `ProviderPermissions` resource.
+When a `ProviderPermissions` CR is deleted, the operator will just regenerate AuthorizationModel without relations from `ProviderPermissions` resource. So no finalization logic is needed for this resource.
+
+### Roles sharing between different ApiExport 
+What if one provider has introduced a role `approver` and another provider whant to use this role?
+If one provider has 2 or more `ApiExports`. And provider want to have the same role-relation for his API, he can do this by defining the role with identical name in both `ProviderPermissions` resources. 
+
+## Future improvements
+1. How to deal with `from` operator in OpenFGA.
+`from` operator brings some problems:
+* each provider introduces custom roles and relations only for their API. But with custom `from` relations and default `from parent` providers might have the same parent type and if one provider defines the relation like `define approver: [role#assigne] or approver from parent` and another provider defines a relation like `define approver: [role#assigne] or admin or approver from parent`, and the `parent` relation for both of them is the same, e.g `core_namespace` type. In this case it's not clear which relation should be used in parent `core_namespace` type. 
+
+If provider doesn't use custom `from` operator or default `from parent` relation, they might define identical by name relations but different in content because they manage different API untill they use `from` operator.
+
+* Imagine provider defines a role which is translated into this relation `define admin: [role#assigne] or admin from parent` and `parent` is an `account` type. In this case we can create an identical relation `define admin: [role#assigne] or admin from parent` in `account` type to let the OpenFGA schema compile. And if we do this, we introduce the logic that an admin of parent account is an admin of a child account but maybe user doesn't want it and he wants to have an admin per account without inheritance between accounts but the user wants an inheritance between resource types.
+
+2. How a provider can create an organization wild role? 
