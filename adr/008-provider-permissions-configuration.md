@@ -46,57 +46,11 @@ And it's not flexible right now. With this feature we want to introduce the abil
 2. Security-operator reconciles ApiBinding resource when somebody binds provider's API. At this moment security-operator generates AuthorizationModel resources based on bound `ApiResourceSchema` resources. At this moment security-operator will check if there is a defined `ProviderPermissions` resource and if so, security-operator will merge relations from `ProviderPermissions` and the default `AuthorizationModel`.
 3. When `AuthorizationModel` is written into the cluster, store reconciliation will be triggered and the updated `AuthorizationModel` will reach OpenFGA.
 
-```mermaid
----
-config:
-  theme: base
-  themeVariables:
-    fontSize: 20px
-    fontFamily: arial
-    background: "#ffffff"
-  layout: fixed
----
-flowchart LR
- subgraph Inputs["Data for AuthorizationModel generation"]
-        AB["APIBinding"]
-        PP["ProviderPermissions"]
-  end
- subgraph Webhook["Webhook"]
-        VAL["Validates ProviderPermissions<br><br>• DSL syntax validation<br>• Roles match relations"]
-  end
- subgraph AMC["APIBinding Controller<br>AuthorizationModelGenerationSubroutine"]
-        W["Watches:<br>• APIBinding<br>• ProviderPermissions"]
-        G["Generate base model<br>from APIResourceSchema"]
-        M["Merge ProviderPermissions<br>override matching relations"]
-        U["Update<br>AuthorizationModel"]
-  end
- subgraph Resources["Resources"]
-        AM["AuthorizationModel<br>spec.Model = base + PP"]
-  end
- subgraph SC["Store Controller"]
-        S["Reads AM.spec.Model<br>Writes to OpenFGA"]
-  end
-    W --> G
-    G --> M
-    M --> U
-    Webhook --> PP
-    AB -- watch --> W
-    PP -- watch --> W
-    U -- creates/updates --> AM
-    AM -- watch --> S
-    S --> FGA[("OpenFGA")]
-
-    style Webhook fill:#ffccd2
-    style AMC fill:#fff3e0
-    style SC fill:#e8f5e9
-    style Inputs fill:#e3f2fd
-    style Resources fill:#f3e5f5
-```
 
 ## Open questions
-1. Should we allow providers to add their roles into existing resources and into the account, or should they operate only over their own API? In the latter case, security-operator should be in charge of properly integrating new roles. 
+1. How to deal with `from` operator and `from parent` relation in terms of our OpenFGA structure
 
-### OpenFGA DSL Syntax
+### OpenFGA DSL Syntax for OpenFGA mode
 
 Relations are defined using the following syntax:
 
@@ -134,31 +88,32 @@ spec:
   apiExportRef:
     name: orchestrate.platform-mesh.io
 
-  # Roles metadata for UI display (id must match a relation name in types)
+  # Roles metadata for UI display, grouped by resource type, resource types must match only resources provider manages
   roles:
-    - id: codeviewer
-      displayName: Code Viewer
-      description: Can view code and related resources.
-    - id: admin
-      displayName: Admin
-      description: Administrative access with elevated permissions.
+    - groupResource: orchestrate.platform-mesh.io.httpbin
+      roles:
+        - id: codeviewer
+          displayName: Code Viewer
+          description: Can view code and related resources.
+          definition: "[role#assignee] or member"
+        - id: admin
+          displayName: Admin
+          description: Administrative access with elevated permissions.
+          definition: "[role#assignee] or owner"
 
-  # OpenFGA types and their relations. Type name matches the type name from AuthorizationModel. 
-  # Relations section represents relations which extend the default AuthorizationModel or override 
-  # relations from it.
-  types:
-    - name: orchestrate_platform-mesh_io_httpbin
-      relations:
-        # New custom roles
-        - "define codeviewer: [role#assignee] or member"
-        - "define admin: [role#assignee] or owner"
-        # Custom permissions (not auto-generated)
-        - "define view_source: codeviewer or admin"
-        - "define run_scan: admin"
-        - "define export_data: member or codeviewer"
-        - "define manage_config: admin or owner"
-        # Override of default relations
-        - "define manage_iam_roles: owner"
+  permissions:
+    # name of permission sections should match gvk of resource specified in ApiExport
+    orchestrate.platform-mesh.io.httpbin:
+      defaultPermissions:
+        get: "codeviewer or member"  # define get: codeviewer or member
+        update: ""  # uses default relation - define update: member
+        delete: ""
+        patch: ""
+        watch: ""
+      additionalPermissions:
+        scan: "[user:*] or member"  # define scan: [user:*] or member
+
+    another_resource: {}  # ...
 
 status:
   conditions:
@@ -167,9 +122,163 @@ status:
     - type: RelationsValid
       status: "True"
       message: "All relations parsed successfully"
+    - type: AuthorizationModelIsGenerated
+      status: "False"
+      message: "Failed to generate AuthorizationModel due to relations duplication"
 ```
 
-The operator parses the OpenFGA DSL strings at runtime and validates them against the OpenFGA grammar.
+## How it addresses each requested functionality 
+
+### 1.1 Add new permissions without new roles
+```yaml
+apiVersion: core.platform-mesh.io/v1alpha1
+kind: ProviderPermissions
+metadata:
+  name: orchestrate.platform-mesh.io  # matches the APIExport name
+spec:
+  apiExportRef:
+    name: orchestrate.platform-mesh.io
+
+  permissions:
+    orchestrate_platform-mesh_io_httpbin:
+      defaultPermissions:
+        get: ""
+        update: ""
+        delete: ""
+        patch: ""
+        watch: ""
+      additionalPermissions:
+        codeviewer: "[user] or member"  # will be parsed into relation: define codeviewer: [user] or member
+        admin: "[user] or owner"
+        scan: "[user] or member"
+```
+This resource will add 3 new relations into OpenFGA AuthorizationModel schema.
+
+### 1.2 Add new permissions with new roles
+```yaml
+apiVersion: core.platform-mesh.io/v1alpha1
+kind: ProviderPermissions
+metadata:
+  name: orchestrate.platform-mesh.io  # matches the APIExport name
+spec:
+  apiExportRef:
+    name: orchestrate.platform-mesh.io
+
+  roles:
+    - groupResource: orchestrate.platform-mesh.io.httpbin
+      roles:
+        - id: codeviewer
+          displayName: Code Viewer
+          description: Can view code and related resources.
+          definition: "[role#assignee] or owner"  # optional as relation definition is needed only for OpenFGA
+
+  permissions:
+    orchestrate_platform-mesh_io_httpbin:
+      defaultPermissions:
+        get: ""
+        update: ""
+        delete: ""
+        patch: ""
+        watch: ""
+      additionalPermissions:
+        admin: "[user] or owner"  # also a user can define here a role/relation here, but it will not be shown on the UI
+        approve: "codeviewer or owner"  # here codeviewer is a relation as well, and provider needs to define what is the codeviewer.
+                                        # basically it's a role in RBAC system, and 'role' relation in ReBAC system.
+                                        # Provider can specify the roles relations in role: section
+```
+
+### 2. Change default permissions
+```yaml
+apiVersion: core.platform-mesh.io/v1alpha1
+kind: ProviderPermissions
+metadata:
+  name: orchestrate.platform-mesh.io  # matches the APIExport name
+spec:
+  apiExportRef:
+    name: orchestrate.platform-mesh.io
+
+  roles:
+    - groupResource: orchestrate.platform-mesh.io.httpbin
+      roles:
+        - id: codeviewer
+          displayName: Code Viewer
+          description: Can view code and related resources.
+          definition: "[role#assignee] or owner"  # optional as relation definition is needed only for OpenFGA
+
+  permissions:
+    orchestrate_platform-mesh_io_httpbin:
+      defaultPermissions:
+        get: "codeviewer"  # will be parsed into define get: codeviewer
+                           # it requires adding codeviewer role/relation into additionalPermissions or in roles section
+                           # otherwise AuthorizationModel schema generation will fail
+        update: ""
+        delete: ""
+        patch: ""
+        watch: ""
+      # additionalPermissions:
+      #   codeviewer: "[user] or member"  # will be parsed into relation: define codeviewer: [user] or member
+```
+
+### 3. Introduce new roles
+
+```yaml
+roles:
+  - groupResource: orchestrate.platform-mesh.io.httpbin
+    roles:
+      - id: codeviewer  # relation/role name. In OpenFGA world it will stand for define <relation_name>: ...
+        displayName: Code Viewer  # provider can specify how the role will be shown on the UI
+        description: Can view code and related resources.  # provider can explain what the role does here
+        definition: "[role#assignee] or owner"  # (optional) for OpenFGA it's essential as in OpenFGA role is just a relation.
+                                                # In future with RBAC system (or another authorization module) it can be left empty
+```
+
+
+Provider can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types which are `gvk` like `orchestrate.platform-mesh.io.httpbin`. Security-operator while generating AuthorizationModel will check if there are custom roles from the provider and if roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
+
+## IAM service integration 
+
+ProviderPermissions resource is an organization agnostic and it means that IAM service needs the way to understand if the PP resource is relevant to the current request context. To do this all is needed is gvk of the resource and clusterName where resource is created. It's very similar to what IAM service currently has 
+
+```go
+// resolver api for getting roles related to the gvk
+Roles(ctx context.Context, context graph.ResourceContext) ([]*graph.Role, error)
+
+type Resource struct {
+	Name      string  `json:"name"`
+	Namespace *string `json:"namespace,omitempty"`
+}
+
+// Common resource context used across queries and mutations
+type ResourceContext struct {
+	Group       string    `json:"group"`
+	Kind        string    `json:"kind"`
+	Resource    *Resource `json:"resource"`
+	AccountPath string    `json:"accountPath"`
+}
+```
+
+Roles() call already has enough information to get roles which are defined for the resource type. It might happen like this:
+1. Using AccountPath get the workspace which has been created for this account
+2. Get the logical cluster name from the workspace's `spec.cluster` field.
+3. From logical cluster get `ApiBindings` and filter out all kcp's and platform-mesh default apibindings. In the result we will have only provider's bindings
+4. Each `ApiBinding` has a reference to the `ApiExport` it's related to. And we can get `ProviderPermissions` resources of providers which API is bound to this specific logical cluster
+5. Than we can get roles for every gvk from ProviderPermissions resources.
+
+The grahql mutation which can assign user a role to a resource type
+
+```graphql
+  {
+    "context": {
+      "group": "orchestrate.platform-mesh.io",
+      "kind": "HTTPBin",
+      "resource": { "name": "my-httpbin-1" },
+      "accountPath": "root:orgs:test:testAccount"
+    },
+    "changes": [
+      { "userId": "john@gmail.com", "roles": ["reviewer"] }
+    ]
+  }
+```
 
 ### Validation
 
