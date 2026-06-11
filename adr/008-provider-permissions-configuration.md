@@ -2,7 +2,7 @@
 
 ## Context and Problem Statement
 
-Currently for provider's API Platform Mesh generates AuthorizationModel resource with default relations within the Kubernetes. For example, an AuthorizationModel for example-data provider looks like this:
+Currently, for a provider's API, Platform Mesh generates an AuthorizationModel resource with default relations within Kubernetes. For example, an AuthorizationModel for the example-data provider looks like this:
 
 ```
 module httpbins
@@ -38,12 +38,12 @@ And it's not flexible right now. With this feature we want to introduce the abil
 
 ## Decision
 1. Introduce a CRD which will be responsible for extending/overwriting relations which are defined in AuthorizationModel
-2. CRs of this CRD will be owned by provider and will be created in provider's workspace alongside of the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider's resources.
-3. Provider cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
+2. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
+3. Providers cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
 
 ## Flow of work
-1. Provider creates ProviderPermissions resource in provider's workspace. It might happen as at the moment when AuthorizationModel already exists or after it
-2. Security-operator reconciles ApiBinding resource when somebody binds provider's API. At this moment security-operator generates AuthorizationModel resources based on bound `ApiResourceSchema` resources. At this moment security-operator will check if there is a defined `ProviderPermissions` resource and if so, security-operator will merge relations from `ProviderPermissions` and the default `AuthorizationModel`.
+1. Provider creates a ProviderPermissions resource in the provider's workspace. This might happen when an AuthorizationModel already exists or after it.
+2. Security-operator reconciles the ApiBinding resource when somebody binds the provider's API. At this moment, security-operator generates AuthorizationModel resources based on bound `ApiResourceSchema` resources. At this point, security-operator will check if there is a defined `ProviderPermissions` resource and if so, it will merge relations from `ProviderPermissions` with the default `AuthorizationModel`.
 3. When `AuthorizationModel` is written into the cluster, store reconciliation will be triggered and the updated `AuthorizationModel` will reach OpenFGA.
 
 
@@ -122,7 +122,7 @@ status:
     - type: RelationsValid
       status: "True"
       message: "All relations parsed successfully"
-    # This status is specificly important because this is how Provider can see 
+    # This status is specifically important because this is how the provider can see 
     # if an AuthorizationModel was generated fine or there's an error due to PP resource
     - type: AuthorizationModelIsGenerated
       status: "False"
@@ -179,7 +179,7 @@ spec:
           displayName: Code Viewer
           description: Can view code and related resources.
           definition: "[role#assignee] or owner"  # optional as relation definition is needed only for OpenFGA
-                                                  # and in RBAC mode it will not needed
+                                                  # and in RBAC mode it will not be needed
 
   permissions:
     orchestrate_platform-mesh_io_httpbin:
@@ -190,7 +190,7 @@ spec:
         patch: ""
         watch: ""
       additionalPermissions:
-        admin: "[user] or owner"  # also a user can define here a role-relation here, but it will not be shown on the UI
+        admin: "[user] or owner"  # a user can also define a role-relation here, but it will not be shown on the UI
 
         approve: "codeviewer or owner"  # here codeviewer is a relation as well, and provider needs to define what is the codeviewer.
                                         # basically it's a role in RBAC system, and 'role' relation in ReBAC system.
@@ -198,7 +198,7 @@ spec:
 ```
 
 ### 2. Change default permissions
-To change default permissions-relations in the generated AuthorizationModel, provider has `defaultPermissions` section. Currently we allow override only of 5 default kubernetes verbs: `get`, `update`, `delete`, `patch`, `watch`. From OpenFGA perspective provider can write any relation instead of the default one. From RBAC perspective provider can use this for role name override.
+To change default permission-relations in the generated AuthorizationModel, providers have the `defaultPermissions` section. Currently, we allow overriding only 5 default Kubernetes verbs: `get`, `update`, `delete`, `patch`, `watch`. From an OpenFGA perspective, providers can write any relation instead of the default one. From an RBAC perspective, providers can use this for role name override.
 
 ```yaml
 apiVersion: core.platform-mesh.io/v1alpha1
@@ -245,11 +245,11 @@ roles:
 ```
 
 
-Provider can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types which are `gvk` like `orchestrate.platform-mesh.io.httpbin`. Security-operator while generating AuthorizationModel will check if there are custom roles from the provider and if roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
+Providers can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types which are `gvk` like `orchestrate.platform-mesh.io.httpbin`. While generating AuthorizationModel, security-operator will check if there are custom roles from the provider. If roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
 
 ## IAM service integration 
 
-ProviderPermissions resource is an organization agnostic and it means that IAM service needs the way to understand if the PP resource is relevant to the current request context. To do this all is needed is gvk of the resource and clusterName where resource is created. It's very similar to what IAM service currently has 
+The ProviderPermissions resource is organization-agnostic, which means that the IAM service needs a way to understand if the PP resource is relevant to the current request context. To do this, all that is needed is the gvk of the resource and the clusterName where the resource is created. This is very similar to what the IAM service currently has: 
 
 ```go
 // resolver api for getting roles related to the gvk
@@ -269,14 +269,16 @@ type ResourceContext struct {
 }
 ```
 
-Roles() call already has enough information to get roles which are defined for the resource type. It might happen like this:
-1. Using AccountPath get the workspace which has been created for this account
+The Roles() call already has enough information to get roles which are defined for the resource type. It might work like this:
+1. Using AccountPath, get the workspace which has been created for this account.
 2. Get the logical cluster name from the workspace's `spec.cluster` field.
-3. From logical cluster get `ApiBindings` and filter out all kcp's and platform-mesh default apibindings. In the result we will have only provider's bindings
-4. Each `ApiBinding` has a reference to the `ApiExport` it's related to. And we can get `ProviderPermissions` resources of providers which API is bound to this specific logical cluster
-5. Than we can get roles for every gvk from ProviderPermissions resources.
+3. From the logical cluster, get `ApiBindings` and filter out all KCP's and platform-mesh default apibindings. The result will contain only provider's bindings.
+4. Each `ApiBinding` has a reference to the `ApiExport` it's related to. We can get `ProviderPermissions` resources of providers whose API is bound to this specific logical cluster.
+5. Then we can get roles for every gvk from ProviderPermissions resources.
 
-The grahql mutation which can assign user a role to a resource type
+Also with a lot of providers it may become slow. To resolve this the cache in iam service might be used which will  be dynamicly populated when ProviderPermissions resources are updated/created/deleted.
+
+The GraphQL mutation which can assign a user a role to a resource type:
 
 ```graphql
   {
@@ -294,7 +296,7 @@ The grahql mutation which can assign user a role to a resource type
 
 ### Validation
 
-The validation webhook must validate that a provider can only define permissions for resources it owns and ideally also validate defined permissions and roles before applying the resource into the clsuter. This prevents a malicious or misconfigured provider from overwriting permissions for other provider's or system resources and improves user's experience.
+The validation webhook must validate that a provider can only define permissions for resources it owns and ideally also validate defined permissions and roles before applying the resource into the cluster. This prevents a malicious or misconfigured provider from overwriting permissions for other providers' or system resources and improves the user's experience.
 
 Potential validation rules:
 - The resource names declared in `spec.permissions` keys (e.g., `orchestrate.platform-mesh.io.httpbin`) must correspond to API resources exposed by the referenced `apiExportRef`
@@ -304,17 +306,17 @@ Potential validation rules:
 
 When a `ProviderPermissions` CR is deleted, the operator will just regenerate AuthorizationModel without relations from `ProviderPermissions` resource. So no finalization logic is needed for this resource.
 
-### Roles sharing between different ApiExport 
-What if one provider has introduced a role `approver` and another provider whant to use this role?
-If one provider has 2 or more `ApiExports`. And provider want to have the same role-relation for his API, he can do this by defining the role with identical name in both `ProviderPermissions` resources. 
+### Roles sharing between different ApiExports
+What if one provider has introduced a role `approver` and another provider wants to use this role?
+If one provider has 2 or more `ApiExports` and wants to have the same role-relation for their API, they can do this by defining the role with an identical name in both `ProviderPermissions` resources. 
 
 ## Future improvements
-1. How to deal with `from` operator in OpenFGA.
-`from` operator brings some problems:
-* each provider introduces custom roles and relations only for their API. But with custom `from` relations and default `from parent` providers might have the same parent type and if one provider defines the relation like `define approver: [role#assigne] or approver from parent` and another provider defines a relation like `define approver: [role#assigne] or admin or approver from parent`, and the `parent` relation for both of them is the same, e.g `core_namespace` type. In this case it's not clear which relation should be used in parent `core_namespace` type. 
+1. How to deal with the `from` operator in OpenFGA.
+The `from` operator brings some problems:
+* Each provider introduces custom roles and relations only for their API. But with custom `from` relations and the default `from parent`, providers might have the same parent type. If one provider defines a relation like `define approver: [role#assignee] or approver from parent` and another provider defines a relation like `define approver: [role#assignee] or admin or approver from parent`, and the `parent` relation for both of them is the same (e.g., `core_namespace` type), it's not clear which relation should be used in the parent `core_namespace` type.
 
-If provider doesn't use custom `from` operator or default `from parent` relation, they might define identical by name relations but different in content because they manage different API untill they use `from` operator.
+If providers don't use a custom `from` operator or the default `from parent` relation, they might define relations with identical names but different content because they manage different APIs - until they use the `from` operator.
 
-* Imagine provider defines a role which is translated into this relation `define admin: [role#assigne] or admin from parent` and `parent` is an `account` type. In this case we can create an identical relation `define admin: [role#assigne] or admin from parent` in `account` type to let the OpenFGA schema compile. And if we do this, we introduce the logic that an admin of parent account is an admin of a child account but maybe user doesn't want it and he wants to have an admin per account without inheritance between accounts but the user wants an inheritance between resource types.
+* Imagine a provider defines a role which is translated into this relation: `define admin: [role#assignee] or admin from parent` and `parent` is an `account` type. In this case, we can create an identical relation `define admin: [role#assignee] or admin from parent` in the `account` type to let the OpenFGA schema compile. But if we do this, we introduce the logic that an admin of a parent account is an admin of a child account - but maybe the user doesn't want this. They might want an admin per account without inheritance between accounts, while still wanting inheritance between resource types.
 
-2. How a provider can create an organization wild role? 
+2. How can a provider create an organization-wide role? 
