@@ -1,4 +1,4 @@
-# ADR 008: Provider Permissions Configuration
+# RFC 008: Provider Permissions Configuration
 
 ## Context and Problem Statement
 
