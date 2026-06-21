@@ -4,7 +4,7 @@
 |---------|------------|
 | Author  | @mjudeikis |
 | Created | 2026-03-18 |
-| Updated | 2026-03-30 |
+| Updated | 2026-05-26 |
 
 ## Summary
 
@@ -37,9 +37,10 @@ It is problematic to offer a resource in kcp that can cause deployments into the
 ```
 :root
   └── :providers
-        ├── :system                            ← APIExport: providers (exposes Provider, recursive bind)
-        ├── :wildwest                          ← bootstrapped provider workspace
-        ├── :httpbin                           ← bootstrapped provider workspace
+        ├── :system                            ← system Provider resources + their dependants
+        ├── :httpbin-234badf00d                ← bootstrapped provider workspace
+        ├── :kube-bind-5badc0ffee              ← bootstrapped provider workspace (originating from a ManagedProvider)
+        ├── :wildwest-0deadbeef1               ← bootstrapped provider workspace
         └── ...
 ```
 
@@ -51,21 +52,16 @@ Platform-mesh operator (runs on runtime/hosting cluster)
   ├── Provider controller (watches kcp via VirtualWorkspace)
   │     Triggered by: Provider resource in a kcp workspace
   │     Actions (kcp-side only):
-  │       1. Create ServiceAccount in provider workspace
-  │       2. Create RBAC (roles, bindings)
-  │       3. Generate kubeconfig Secret in provider workspace
-  │     Note: requires permission claims with constraints
+  │       1. Create provider workspace root:providers:<Provider.Name>-<Suffix>, where <Suffix> must be unique to that Provider
+  │       2. Create admin ServiceAccount in provider workspace
+  │       3. Generate kubeconfig Secret in target workspace
   │
   └── ManagedProvider controller (watches runtime cluster)
         Triggered by: ManagedProvider CR on runtime cluster
         Actions:
-          1. Create provider workspace in kcp with correct type
-          2. Create a Provider resource in the new workspace
-          3. Wait for Provider status.phase == Ready
-          4. Copy kubeconfig Secret from provider workspace to runtime namespace
-          5. Resolve OCM component → extract Helm chart + image ref
-          6. Deploy controller to target cluster (may be a different cluster)
-          7. Deploy portal (optional)
+          1. Wait for Provider status.phase == Ready
+          2. Copy kubeconfig Secret from Provider's workspace to runtime cluster
+          3. Deploy OCM components inside runtimeDeployments into runtime cluster
 ```
 
 ### Authentication
@@ -77,7 +73,7 @@ Two supported modes:
 
 Note: generated kubeconfigs must use the logical cluster name (e.g. `2cyb4oxml4sv8o3r`), not the human-readable workspace path, for obfuscation.
 
-### Example: ProviderSetup (kcp-level, bootstrap-only)
+### Example: Provider (kcp-level, bootstrap-only)
 
 Created in any workspace that has bound the `providers` APIExport.
 
@@ -87,11 +83,13 @@ kind: Provider
 metadata:
   name: wildwest
 spec:
-  hostOverride: "https://frontproxy.platform-mesh-system:6443" # optional
+  providerKubeconfigSecret:
+    name: my-secret-name
+    namespace: my-secret-namespace
+    key: kubeconfig
+  hostOverride: "https://frontproxy.platform-mesh-system:8443" # optional
 status:
   phase: Ready
-  kubeconfigSecretRef:
-    name: wildwest-kubeconfig  # Secret created in this workspace
 ```
 
 ### Example: ManagedProvider (runtime-level, full lifecycle)
@@ -103,16 +101,42 @@ metadata:
   name: wildwest
   namespace: platform-mesh-system
 spec:
-  workspacePath: "root:providers:wildwest" # optional, defaults to root:providers:system:<name>
-  controller:
-    ocm:
+  # Optional. Defaults to root:providers:system
+  # Where to create the Provider resource.
+  provider:
+    path: root:orgs:org-a:bob
+    name: wildwest
+
+  # Optional. Defaults to <ManagedProvider.Namespace>/provider-<ManagedProvider.Name>-kubeconfig
+  # Override destination of the admin kubeconfig to provider's workspace (e.g. root:orgs:org-a:bob).
+  # This is stored inside the runtime cluster (runtimeKubeconfigSecret).
+  providerKubeconfigSecret:
+    name: my-secret-name
+    namespace: my-secret-namespace
+    key: kubeconfig # Optional. The service controller may need a different key. Defaults to "kubeconfig".
+
+  # Optional.
+  # Deploy the resources from runtimeDeployments into
+  # a different cluster pointed to by the referrenced kubeconfig.
+  runtimeKubeconfigSecret:
+    name: my-service-cluster-kubeconfig
+    key: kubeconfig
+
+  runtimeDeployments:
+  - ocm: # We may provide different component sources in the future. For now it's OCM->OCIRepository->HelmRelease.
       componentName: github.com/platform-mesh/wildwest-controller
       version: "0.1.0"
       registry: ghcr.io/platform-mesh/ocm
       values:
-        endpointSlice: wildwest.platform-mesh.io
-  portal:
-    ocm:
+        # We expect the service controller to have its own workspace bootstrapping phase.
+        # This service controller is then responsible for populating that workspace with all resources
+        # necessary to provide the service (APIResourceSchemas, APIExports, ...)
+        provider:
+          bootstrap:
+            kubeconfigRef:
+              name: my-secret-name
+              namespace: my-secret-namespace
+  - ocm:
       componentName: github.com/platform-mesh/wildwest-portal
       version: "0.1.0"
       registry: ghcr.io/platform-mesh/ocm
@@ -124,30 +148,27 @@ spec:
 ManagedProvider CR created (runtime cluster)
   │
   ▼
-1. Create provider workspace in kcp (:root:system:providers:<name>)
+1. Create Provider resource at specified location
   │
   ▼
-2. Create Provider resource in the new workspace
+2. Wait for Provider status.phase == Ready
+   (Provider controller creates workspace, SA, RBAC, kubeconfig in kcp)
   │
   ▼
-3. Wait for Provider status.phase == Ready
-   (Provider controller creates SA, RBAC, kubeconfig in kcp)
+3. Copy kubeconfig Secret from kcp workspace → runtime namespace
   │
   ▼
-4. Copy kubeconfig Secret from kcp workspace → runtime namespace
+4. Deploy runtimeDeployments components
   │
   ▼
-5. Resolve OCM components, deploy controller + portal
-  │
-  ▼
-6. Ready — continuous drift detection
+5. Ready — continuous drift detection
 ```
 
 ### Teardown
 
-**ManagedProvider deletion**: uninstall Helm releases, delete runtime kubeconfig Secret, optionally delete kcp workspace (`spec.cleanupOnDelete: true`).
+**ManagedProvider deletion**: uninstall runtime Helm releases, delete runtime kubeconfig Secret, optionally delete kcp workspace (`spec.cleanupOnDelete: true`).
 
-**ProviderSetup deletion**: clean up SA, RBAC, APIExport, and kubeconfig Secret within the kcp workspace.
+**Provider deletion**: clean up SA, RBAC, APIExport, and kubeconfig Secret within the kcp workspace.
 
 ### Portability
 
@@ -157,6 +178,3 @@ Existing providers (provider-quickstart, http-bin, resource-broker) should be po
 
 1. Should OIDC keyless auth be the default long-term, with SA kubeconfigs as a stopgap?
 2. Credential rotation strategy for long-lived SA tokens.
-3. OCM value injection conventions (`image.repository`, `image.tag`, `kubeconfigSecret.name`).
-4. Exact permission claims and constraints needed for the ProviderSetup controller's VirtualWorkspace access.
-5. Should the ManagedProvider support deploying to a cluster different from where the operator runs?
