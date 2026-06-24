@@ -126,8 +126,9 @@ interface, not the implementation, is the contract.
 ### Layers
 
 The **layers** are the precomposed, officially tested module sets. They are
-strictly ordered: an outer layer depends on the layers beneath it, never the
-other way around.
+strictly ordered: an outer layer depends on the layer beneath it, never the
+other way around. Each layer is always present in at least a **minimal form**,
+so nothing truly skips a layer — see *Supported Compositions* below.
 
 | Layer | Capability added | Default modules |
 |-------|------------------|-----------------|
@@ -148,9 +149,7 @@ identity automation in L2, OpenFGA automation in L3.
 The **layered shapes** are the first-class, fully E2E-tested compositions
 (Tier 1). Beyond them, **module compositions** assemble layers
 non-contiguously; they are supported, explicitly named, and classified by
-[support tier](#support-tiers) rather than implicitly promised. The seven
-configuration variants of the original RFC 008 all remain reachable; they map
-onto these shapes, shown in the *Former variant* column.
+[support tier](#support-tiers) rather than implicitly promised.
 
 | Shape / composition | Layers | Description | Tier | Former variant |
 |---|---|---|---|---|
@@ -166,15 +165,23 @@ onto these shapes, shown in the *Former variant* column.
 Tier 1 shapes are covered by the full E2E test suite on every release; Tier 2
 compositions are actively tested in CI with documented configuration.
 
-A composition can omit a layer in the middle only because every module
-defines its behavior when an optional dependency is absent (e.g. L3 absent →
-RBAC fallback; L2 absent → externally configured OIDC issuer from L1). What
-is *not* possible is omitting a capability that an outer module strictly
-requires: the Portal's value depends on knowing who the user is, so some
-form of identity, managed (L2) or external (L1's OIDC issuer configuration),
-is always required beneath L4. **L1 is the floor:** L2–L4 are omittable, but a
-deployment without L1 (the kcp control plane and account model) is plain kcp,
-not Platform Mesh.
+What looks like "omitting" a middle layer is really running that layer in its
+**minimal form** — every layer is always present to at least that degree, which
+is why the strict ordering holds and any permutation is expressible:
+
+- **L1 Core** — non-negotiable; the floor. A deployment without L1 is plain kcp,
+  not Platform Mesh.
+- **L2 Authentication** — minimum: an externally configured OIDC issuer; the
+  managed multi-tenant IdP (Keycloak) is the upgrade.
+- **L3 Authorization** — minimum: Kubernetes RBAC, evaluated *in-process* by the
+  API server (no webhook needed). A ReBAC engine (OpenFGA) plugs in as a
+  **webhook authorizer** via `SubjectAccessReview`. The API server
+  authorizes every request either way, so authorization itself is never absent —
+  only the ReBAC *engine* is optional.
+- **L4 Portal** — the interactive UI; omittable entirely for API-only use.
+
+So "L1+L4" means L4 on top of L2 and L3 in their minimal forms, not L4 with no
+identity or authorization beneath it.
 
 ## Optional vs. Replaceable
 
@@ -424,8 +431,7 @@ Helm, …) is the operator's choice, not a module implementation.
   fallback (e.g. their own authorization instead of the Kubernetes RBAC
   fallback). Define how a layer is *replaced*, not only omitted.
 - **Breaking changes for clean interfaces** — providing single, clean interfaces
-  may require breaking changes to current APIs/CRDs, which is in tension with the
-  additive-only [Non-Goal](#non-goals); scope and sequence them.
+  may require breaking changes to current APIs/CRDs.
 
 ## Non-Goals
 
@@ -439,9 +445,6 @@ Helm, …) is the operator's choice, not a module implementation.
   first-class wherever a conforming adapter is maintained, but guaranteeing one
   for every system is explicitly out of scope; that is what keeps the support
   surface bounded.
-- Breaking changes to existing Platform Mesh API or CRD schemas. Additive
-  changes to the PlatformMesh resource for module toggles and OIDC
-  configuration are in scope.
 - Prescribing the administrator's deployment tooling. Platform Mesh defines
   what the `pm-operator` reconciles, not how its manifests reach the
   cluster.
