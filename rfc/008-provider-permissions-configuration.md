@@ -307,7 +307,6 @@ Potential validation rules:
 When a `ProviderPermissions` CR is deleted, the operator will just regenerate AuthorizationModel without relations from `ProviderPermissions` resource. So no finalization logic is needed for this resource.
 
 ### Roles sharing between different ApiExports
-What if one provider has introduced a role `approver` and another provider wants to use this role?
 If one provider has 2 or more `ApiExports` and wants to have the same role-relation for their API, they can do this by defining the role with an identical name in both `ProviderPermissions` resources. 
 
 ## Future improvements
