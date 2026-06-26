@@ -37,9 +37,10 @@ And it's not flexible right now. With this feature we want to introduce the abil
 * Introduce the possibility to define new roles (IAM service needs to know about them)
 
 ## Decision
-1. Introduce a CRD which will be responsible for extending/overwriting relations which are defined in AuthorizationModel
-2. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
-3. Providers cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
+1. Introduce a `ProviderPermissions` CRD in the `provider.platform-mesh.io` API group which will be responsible for extending/overwriting relations which are defined in AuthorizationModel.
+2. The `ProviderPermissions` resource will be part of the `providers.platform-mesh.io` APIExport, making it available in provider's workspaces under `:root:providers` path
+3. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
+4. Providers cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
 
 ## Flow of work
 1. Provider creates a ProviderPermissions resource in the provider's workspace. This might happen when an AuthorizationModel already exists or after it.
@@ -79,7 +80,7 @@ The variety of options for defining relations makes it hard to propose a typed w
 The `ProviderPermissions` CR allows providers to define OpenFGA-style types and relations for their resources. A single CR can define multiple types, each with its own set of relations expressed as strings in OpenFGA DSL format.
 
 ```yaml
-apiVersion: core.platform-mesh.io/v1alpha1
+apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
   name: orchestrate.platform-mesh.io  # matches the APIExport name
@@ -133,7 +134,7 @@ status:
 
 ### 1.1 Add new permissions without new roles
 ```yaml
-apiVersion: core.platform-mesh.io/v1alpha1
+apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
   name: orchestrate.platform-mesh.io  # matches the APIExport name
@@ -164,7 +165,7 @@ This resource will add 3 new relations into OpenFGA AuthorizationModel schema:
 
 ### 1.2 Add new permissions with new roles
 ```yaml
-apiVersion: core.platform-mesh.io/v1alpha1
+apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
   name: orchestrate.platform-mesh.io  # matches the APIExport name
@@ -201,7 +202,7 @@ spec:
 To change default permission-relations in the generated AuthorizationModel, providers have the `defaultPermissions` section. Currently, we allow overriding only 5 default Kubernetes verbs: `get`, `update`, `delete`, `patch`, `watch`. From an OpenFGA perspective, providers can write any relation instead of the default one. From an RBAC perspective, providers can use this for role name override.
 
 ```yaml
-apiVersion: core.platform-mesh.io/v1alpha1
+apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
   name: orchestrate.platform-mesh.io  # matches the APIExport name
