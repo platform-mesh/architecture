@@ -83,11 +83,12 @@ The `ProviderPermissions` CR allows providers to define OpenFGA-style types and 
 apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
-  name: orchestrate.platform-mesh.io  # matches the APIExport name
+  name: orchestrate.platform-mesh.io # name can be different from APIExport name
 spec:
   # Reference to the APIExport this config applies to
-  apiExportRef:
-    name: orchestrate.platform-mesh.io
+  apiExport:
+    ref:
+      name: orchestrate.platform-mesh.io
 
   # Roles metadata for UI display, grouped by resource type, resource types must match only resources provider manages
   roles:
@@ -137,10 +138,11 @@ status:
 apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
-  name: orchestrate.platform-mesh.io  # matches the APIExport name
+  name: orchestrate.platform-mesh.io
 spec:
-  apiExportRef:
-    name: orchestrate.platform-mesh.io
+  apiExport:
+    ref:
+      name: orchestrate.platform-mesh.io
 
   permissions:
     orchestrate_platform-mesh_io_httpbin:
@@ -168,10 +170,11 @@ This resource will add 3 new relations into OpenFGA AuthorizationModel schema:
 apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
-  name: orchestrate.platform-mesh.io  # matches the APIExport name
+  name: orchestrate.platform-mesh.io
 spec:
-  apiExportRef:
-    name: orchestrate.platform-mesh.io
+  apiExport:
+    ref:
+      name: orchestrate.platform-mesh.io
 
   roles:
     - groupResource: orchestrate.platform-mesh.io.httpbin
@@ -205,10 +208,11 @@ To change default permission-relations in the generated AuthorizationModel, prov
 apiVersion: providers.platform-mesh.io/v1alpha1
 kind: ProviderPermissions
 metadata:
-  name: orchestrate.platform-mesh.io  # matches the APIExport name
+  name: orchestrate.platform-mesh.io
 spec:
-  apiExportRef:
-    name: orchestrate.platform-mesh.io
+  apiExport:
+    ref:
+      name: orchestrate.platform-mesh.io
 
   roles:
     - groupResource: orchestrate.platform-mesh.io.httpbin
