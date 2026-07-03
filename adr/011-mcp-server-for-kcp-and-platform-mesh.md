@@ -1,4 +1,4 @@
-# ADR 007: MCP Server for kcp and Platform Mesh with Permission-Aware Access
+# ADR 011: MCP Server for kcp and Platform Mesh with Permission-Aware Access
 
 | Status           | Proposed                                                     |
 |------------------|--------------------------------------------------------------|
