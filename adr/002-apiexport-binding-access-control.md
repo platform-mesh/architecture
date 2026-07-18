@@ -251,7 +251,7 @@ kcp's workspace initializer creates those bindings itself under a privileged ide
 Decision 1 ("APIExports are not bindable by default") holds only for binds
 requested by a workspace tenant. 
 
-Impact: a platform-mesh administrator who gates an export w ith an `APIExportPolicy` may not realize the API is still served in every account workspace. An export must not be gated by an `APIExportPolicy` and listed in `defaultAPIBindings` at the same time. The two contradict each other and the default binding wins. 
+Impact: a platform-mesh administrator who gates an export with an `APIExportPolicy` may not realize the API is still served in every account workspace. An export must not be gated by an `APIExportPolicy` and listed in `defaultAPIBindings` at the same time. The two contradict each other and the default binding wins. 
 
 ## Future Improvements/Considerations
 - **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
