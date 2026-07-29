@@ -128,9 +128,90 @@ sequenceDiagram
 - Index update strategy (real-time vs. near-real-time) needs to be defined, considering the trade-off between freshness and indexing load
 - Contextual tuple invalidation/refresh strategy is needed to handle FGA policy changes that affect indexed tuples
 
+### Option 2: Account-Scoped Pre-filtering with Authorization Query and Post-check
+
+This option extends Option 1 by adding the **linked Account** for each indexed resource as a first-class field in the OpenSearch document. Before running the full search, the search service queries the Authorization Backend to determine which Accounts the requesting user can see. This account list is then injected as a filter into the OpenSearch query, so only documents belonging to visible accounts are ever returned. The FGA batch-check post-filter from Option 1 is retained for fine-grained object-level permission enforcement, but now operates on a significantly reduced and more predictable candidate set.
+
+#### Indexing
+
+Identical to Option 1, with one addition: the **Account identifier** (the KCP account to which the resource belongs) is stored as a dedicated, filterable field in the OpenSearch document. This field already exists logically in Option 1 as "Parent Account" but is promoted here to be the primary pre-filter dimension.
+
+```mermaid
+graph LR
+    subgraph "Indexing Pipeline"
+        A[KCP Resource Event] --> B[Index Enricher]
+        B --> C{Resolve Metadata}
+        C --> D[Object ID]
+        C --> E[Account ID ← promoted filter field]
+        C --> F[Contextual Tuple]
+        D --> G[OpenSearch Document]
+        E --> G
+        F --> G
+        B --> G
+    end
+
+    subgraph "OpenSearch"
+        G --> H[(Search Index)]
+    end
+
+    style A fill:#f9f,stroke:#333
+    style G fill:#bbf,stroke:#333
+    style H fill:#bbf,stroke:#333
+```
+
+#### Querying and Permission Filtering
+
+When a search query is executed:
+
+1. **Account visibility query**: The search service calls the Authorization Backend with a `ListObjects` (or equivalent) query: *"which Accounts can this user see?"* The result is a list of Account identifiers the user is permitted to access.
+2. **Account-scoped OpenSearch query**: The original search query is augmented with a filter on the `account` field, restricting candidates to documents belonging to the visible accounts. This happens before any pagination math, so OpenSearch's `total` hit count reflects only account-accessible documents.
+3. **batch-check post-filter** (same as Option 1): Results are still checked individually via batch check for fine-grained object-level permissions (e.g., a user may have account access but not `get` on a specific resource).
+4. **Accurate totals**: Because the OpenSearch query is already scoped to visible accounts, the `total` returned by OpenSearch is a tight upper bound on what the user can see.
+5. **Backfill loop** (same as Option 1): If fine-grained post-filtering removes results from a page, additional batches are fetched and checked until the page is satisfied or all candidates are exhausted. With account pre-filtering in place, this loop runs over a much smaller and more predictable candidate set.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant SearchService
+    participant Authorization
+    participant OpenSearch
+
+    Client->>SearchService: Search query (limit=N)
+
+    SearchService->>Authorization: ListObjects(user, can_view, Account)
+    Authorization-->>SearchService: [account-A, account-B, ...]
+
+    SearchService->>OpenSearch: Search query + filter(account IN [account-A, account-B, ...])
+    Note right of OpenSearch: total hits now reflects<br/>only account-visible docs
+
+    loop Until N permitted results or exhausted
+        OpenSearch-->>SearchService: Batch of candidates (account-filtered)
+
+        SearchService->>SearchService: Prepare batch check requests
+        Note right of SearchService: Fine-grained per-object check<br/>using contextual tuples from index
+
+        SearchService->>Authorization: BatchCheck(get, user, objects)
+        Authorization-->>SearchService: Allowed/denied per object
+
+        SearchService->>SearchService: Filter denied results<br/>Accumulate permitted results
+    end
+
+    SearchService-->>Client: Permitted results (up to N) + accurate total
+```
+
+#### Pros:
+- **Accurate totals**: The count returned to the client reflects only documents in accounts the user can actually see, avoiding inflated totals from inaccessible accounts
+- **Fewer or no backfill iterations**: The candidate pool is already scoped to accessible accounts, so fine-grained post-filtering is just a safeguard 
+- **Correct semantics for account-level access**: Account membership is the dominant access control dimension in Platform Mesh . Pre-filtering on it aligns the search behavior with user expectations
+- **All Pros of Option 1 are preserved**: Contextual tuples, batch check, OpenSearch full-text capabilities, and architectural separation of concerns all remain
+
+#### Cons:
+- **IAM Service does not offer such a query right now** This query is essential for Option 2 and is not yet offered by the IAM GraphQL service
+- **Additional Authorization round trip**: The `ListObjects` call for visible accounts adds one extra request to every search query; this can be mitigated with short-lived caching (e.g., per-request or per-session cache with a TTL of a few seconds)
+
 ## Decision Outcome (Proposed)
 
-Option 1 is the only option evaluated so far and is proposed as the implementation approach. It aligns well with the existing Platform Mesh architecture by reusing the FGA model maintained by the security operator and leveraging OpenSearch for search.
+Option 1 is currently proposed as the baseline implementation approach. Option 2 is under evaluation as a refinement that addresses Option 1's inaccurate totals and unpredictable backfill behavior. It aligns well with the existing Platform Mesh architecture by reusing the FGA model maintained by the security operator and leveraging OpenSearch for search.
 
 ### Positive Consequences
 
@@ -194,4 +275,4 @@ Option 1 is the only option evaluated so far and is proposed as the implementati
 
 ## Notes
 
-This is a living document and should be updated as implementation progresses. Currently only one option has been evaluated. Additional options (e.g., pre-computed permission-aware indexes, search proxied through KCP with native authorization) should be evaluated if Option 1 proves insufficient during implementation.
+This is a living document and should be updated as implementation progresses. Two options have been evaluated. Option 2 (account-scoped pre-filtering) is the preferred direction if `ListObjects` query performance is validated to be acceptable at scale. Additional options (e.g., pre-computed permission-aware indexes, search proxied through KCP with native authorization) should be evaluated if neither Option 1 nor Option 2 proves sufficient during implementation.
