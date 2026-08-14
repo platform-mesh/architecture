@@ -37,8 +37,8 @@ And it's not flexible right now. With this feature we want to introduce the abil
 * Introduce the possibility to define new roles (IAM service needs to know about them)
 
 ## Decision
-1. Introduce a `ProviderPermissions` CRD in the `provider.platform-mesh.io` API group which will be responsible for extending/overwriting relations which are defined in AuthorizationModel.
-2. The `ProviderPermissions` resource will be part of the `providers.platform-mesh.io` APIExport, making it available in provider's workspaces under `:root:providers` path
+1. Introduce a `ProviderPermissions` CRD in the `providers.platform-mesh.io` API group which will be responsible for extending/overwriting relations which are defined in AuthorizationModel.
+2. The `ProviderPermissions` resource will be part of the `providers.platform-mesh.io` APIExport, making it available in provider's workspaces under `:root:providers` path and in `:root:platform-mesh-system` workspace.
 3. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
 4. Providers cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
 
@@ -92,7 +92,7 @@ spec:
 
   # Roles metadata for UI display, grouped by resource type, resource types must match only resources provider manages
   roles:
-    - groupResource: orchestrate.platform-mesh.io.httpbin
+    - groupResource: httpbin.orchestrate.platform-mesh.io
       roles:
         - id: codeviewer
           displayName: Code Viewer
@@ -104,8 +104,8 @@ spec:
           definition: "[role#assignee] or owner"
 
   permissions:
-    # name of permission sections should match gvk of resource specified in ApiExport
-    orchestrate.platform-mesh.io.httpbin:
+    # name of permission sections should match {singular}.{group} of resource specified in ApiExport
+    httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
         get: "codeviewer or member"  # define get: codeviewer or member
         update: ""  # uses default relation - define update: member
@@ -145,7 +145,7 @@ spec:
       name: orchestrate.platform-mesh.io
 
   permissions:
-    orchestrate_platform-mesh_io_httpbin:
+    httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
         get: ""
         update: ""
@@ -177,7 +177,7 @@ spec:
       name: orchestrate.platform-mesh.io
 
   roles:
-    - groupResource: orchestrate.platform-mesh.io.httpbin
+    - groupResource: httpbin.orchestrate.platform-mesh.io
       roles:
         - id: codeviewer
           displayName: Code Viewer
@@ -186,7 +186,7 @@ spec:
                                                   # and in RBAC mode it will not be needed
 
   permissions:
-    orchestrate_platform-mesh_io_httpbin:
+    httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
         get: ""
         update: ""
@@ -215,7 +215,7 @@ spec:
       name: orchestrate.platform-mesh.io
 
   roles:
-    - groupResource: orchestrate.platform-mesh.io.httpbin
+    - groupResource: httpbin.orchestrate.platform-mesh.io
       roles:
         - id: codeviewer
           displayName: Code Viewer
@@ -223,7 +223,7 @@ spec:
           definition: "[role#assignee] or owner"  # optional as relation definition is needed only for OpenFGA
 
   permissions:
-    orchestrate_platform-mesh_io_httpbin:
+    httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
         get: "codeviewer"  # will be parsed into define get: codeviewer
                            # it requires adding codeviewer role/relation into additionalPermissions or in roles section
@@ -240,7 +240,7 @@ spec:
 
 ```yaml
 roles:
-  - groupResource: orchestrate.platform-mesh.io.httpbin
+  - groupResource: httpbin.orchestrate.platform-mesh.io
     roles:
       - id: codeviewer  # relation/role name. In OpenFGA mode it will stand for define <relation_name>: ...
         displayName: Code Viewer  # provider can specify how the role will be shown on the UI
@@ -250,38 +250,34 @@ roles:
 ```
 
 
-Providers can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types which are `gvk` like `orchestrate.platform-mesh.io.httpbin`. While generating AuthorizationModel, security-operator will check if there are custom roles from the provider. If roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
+Providers can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types using the `{kind}.{group}` format (e.g., `httpbin.orchestrate.platform-mesh.io`). While generating AuthorizationModel, security-operator will check if there are custom roles from the provider. If roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
 
 ## IAM service integration 
 
-The ProviderPermissions resource is organization-agnostic, which means that the IAM service needs a way to understand if the PP resource is relevant to the current request context. To do this, all that is needed is the gvk of the resource and the clusterName where the resource is created. This is very similar to what the IAM service currently has: 
+The IAM service retrieves custom roles from `ProviderPermissions` resources using a cache-based approach. The cache is populated via an informer watching `ProviderPermissions` across all provider clusters through the multicluster-provider.
 
 ```go
-// resolver api for getting roles related to the gvk
-Roles(ctx context.Context, context graph.ResourceContext) ([]*graph.Role, error)
-
-type Resource struct {
-	Name      string  `json:"name"`
-	Namespace *string `json:"namespace,omitempty"`
+// RolesRetriever interface for getting roles related to a resource type
+type RolesRetriever interface {
+    GetRoleDefinitions(rctx graph.ResourceContext) ([]RoleDefinition, error)
 }
 
 // Common resource context used across queries and mutations
 type ResourceContext struct {
-	Group       string    `json:"group"`
-	Kind        string    `json:"kind"`
-	Resource    *Resource `json:"resource"`
-	AccountPath string    `json:"accountPath"`
+    Group       string    `json:"group"`
+    Kind        string    `json:"kind"`
+    Resource    *Resource `json:"resource"`
+    AccountPath string    `json:"accountPath"`
 }
 ```
 
-The Roles() call already has enough information to get roles which are defined for the resource type. It might work like this:
-1. Using AccountPath, get the workspace which has been created for this account.
-2. Get the logical cluster name from the workspace's `spec.cluster` field.
-3. From the logical cluster, get `ApiBindings` and filter out all KCP's and platform-mesh default apibindings. The result will contain only provider's bindings.
-4. Each `ApiBinding` has a reference to the `ApiExport` it's related to. We can get `ProviderPermissions` resources of providers whose API is bound to this specific logical cluster.
-5. Then we can get roles for every gvk from ProviderPermissions resources.
+The role lookup works as follows:
+1. IAM service watches all `ProviderPermissions` resources across provider clusters using an aggregate informer from multicluster-provider.
+2. When a `ProviderPermissions` is created/updated/deleted, the cache is updated with roles keyed by `groupResource` (e.g., `httpbin.orchestrate.platform-mesh.io`).
+3. When `GetRoleDefinitions()` is called with a `ResourceContext`, the cache is queried using a key built from `{kind-lowercase}.{group}` format.
+4. Matching roles are returned to be displayed in the UI alongside default roles.
 
-Also with a lot of providers it may become slow. To resolve this the cache in iam service might be used which will  be dynamicly populated when ProviderPermissions resources are updated/created/deleted.
+This cache-based approach avoids the need to traverse ApiBindings on each request, providing fast lookups even with many providers.
 
 The GraphQL mutation which can assign a user a role to a resource type:
 
@@ -304,7 +300,7 @@ The GraphQL mutation which can assign a user a role to a resource type:
 The validation webhook must validate that a provider can only define permissions for resources it owns and ideally also validate defined permissions and roles before applying the resource into the cluster. This prevents a malicious or misconfigured provider from overwriting permissions for other providers' or system resources and improves the user's experience.
 
 Potential validation rules:
-- The resource names declared in `spec.permissions` keys (e.g., `orchestrate.platform-mesh.io.httpbin`) must correspond to API resources exposed by the referenced `apiExportRef`
+- The resource names declared in `spec.permissions` keys (e.g., `httpbin.orchestrate.platform-mesh.io`) must correspond to API resources exposed by the referenced `apiExport`
 - The `groupResource` values in `spec.roles` must match API resources managed by the provider
 
 ### Finalization
