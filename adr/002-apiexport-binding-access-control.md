@@ -10,7 +10,7 @@ Today any APIExport can be bound in any workspace. With this feature we introduc
 
 ## Decision
 
-1. **APIExports are not bindable by default.** platform-mesh administator should configure `APIExportPolicy` resource for that APIExport to make it bindable
+1. **APIExports are not bindable by default.** platform-mesh administator should configure `APIExportPolicy` resource for that APIExport to make it bindable. Applies to bindings reuqested by a tenant. Exports listed in `defaultAPIBindings` are outside policy control.
 2. Platform-mesh administrator configure `APIExportPolicy` resources which should be deployed within platform-mesh installation in platform-mesh-system workspace.
 3. The security-operator reconciles `APIExportPolicy` resources and writes tuples directly to the appropriate FGA stores.
 4. The authorization webhook checks the **consumer's** FGA store to determine if the consumer account is allowed to bind the APIExport.
@@ -240,6 +240,18 @@ Check(
 | One account only (`allowPathExpressions`: concrete account path) | 1 | consumer org store containing that account |
 | One org subtree (`allowPathExpressions`: `root:orgs:<org>:*`) | 1 | that org’s FGA store |
 | All orgs (`allowPathExpressions`: `root:orgs:*`) | 1 per org | each org’s FGA store |
+
+## Limitations 
+
+### `defaultAPIBindings` are outside policy control
+
+`APIExportPolicy` cannot gate an APIExport listed in `defaultAPIBindings` of a WorkspaceType.
+kcp's workspace initializer creates those bindings itself under a privileged identity. The authorization webhook is never called, and no FGA check happens. The same applies to workspaces created after a more restrictive `APIExportPolicy` has been created.
+
+Decision 1 ("APIExports are not bindable by default") holds only for binds
+requested by a workspace tenant. 
+
+Impact: a platform-mesh administrator who gates an export with an `APIExportPolicy` may not realize the API is still served in every account workspace. An export must not be gated by an `APIExportPolicy` and listed in `defaultAPIBindings` at the same time. The two contradict each other and the default binding wins. 
 
 ## Future Improvements/Considerations
 - **Organization-level restrictions**: a future iteration should allow workspace admins to remove the bind tuple from their own store.
