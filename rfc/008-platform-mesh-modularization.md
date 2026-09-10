@@ -17,7 +17,7 @@ product "Platform Mesh") through a defined interface.
 Platform Mesh is shipped as a curated default composition of modules.
 
 The default composition is the officially tested and supported product
-of Platform Mesh. Modules can be composed individually. Operators can
+of Platform Mesh. Modules can be composed individually. Admins can
 assemble "their own" Platform Mesh (for example, UI without the
 ReBAC authorization engine, falling back to Kubernetes RBAC).
 
@@ -32,8 +32,8 @@ Mesh two things at once:
   those interfaces out of the box: **Keycloak, OpenFGA, and OpenMFP**,
   the supported "all-in-one" Platform Mesh.
 
-The default stack is what most operators run, and it stays first-class. But
-where an operator already runs their own system (their own Keycloak, Zitadel,
+The default stack is what most admins run, and it stays first-class. But
+where an admin already runs their own system (their own Keycloak, Zitadel,
 or Entra ID instead of the bundled IdP; Headlamp or no portal at all instead of
 OpenMFP; their own GitOps engine), the promise is: **use the interface, and
 where your system does not already speak it, write an adapter.**
@@ -167,7 +167,7 @@ The default composition is covered by the full end-to-end test suite.
 Modularity (the previous sections) answers *"which capabilities run?"*
 Extensibility answers *"whose implementation fills each slot?"* They are the
 same mechanism seen from two sides: every module exposes its capability through
-a defined **interface**: an open standard wherever one exists, and an operator
+a defined **interface**: an open standard wherever one exists, and an admin
 may connect their own system to that interface instead of using the default.
 
 This section is the **map of extension points**: the surface an operator
@@ -180,7 +180,7 @@ mechanism (providers wired to kcp,
 [RFC 004](004_core-platform-extendability.md) /
 [RFC 006](006_provider-bootstrap-operator.md)); the interfaces here are the
 platform's infrastructure contracts. The default stack (Keycloak, OpenFGA,
-OpenMFP) is one supported set of implementations of them; an operator who
+OpenMFP) is one supported set of implementations of them; an admin who
 wants a different implementation targets the interface and supplies an
 [adapter](#adapters) where their system does not already speak it.
 
@@ -191,7 +191,7 @@ wants a different implementation targets the interface and supplies an
 | **Portal** | UI | **GraphQL** over Platform Mesh resources (served by `kubernetes-graphql-gateway`); `ContentConfiguration` + microfrontend = OpenMFP composition, not a standard ([RFC 001](001-api-providers-and-ui-discovery.md)) | OpenMFP | Headlamp (plugin/adapter), custom portal |
 | **Provider / Marketplace** | Core → UI | `APIExport` / `APIBinding` + provider bootstrap (always); `ProviderMetadata` / `ContentConfiguration` for the marketplace UI (UI, optional) ([RFC 004](004_core-platform-extendability.md), [RFC 006](006_provider-bootstrap-operator.md)) | Platform Mesh core providers | Third-party providers contributed to the marketplace |
 | **Observability** | - | OTLP (OpenTelemetry export) | Platform Mesh emits OTLP; no bundled backend | Your Prometheus / Grafana / Datadog / SIEM / audit pipeline |
-| **GitOps Engine** | - | `pm-operator` deploy contract  | none bundled; Flux or ArgoCD (operator chooses) | plain Helm, any deployment tooling |
+| **GitOps Engine** | - | `pm-operator` deploy contract  | none bundled; Flux or ArgoCD (admin chooses) | plain Helm, any deployment tooling |
 
 The table is the canonical map, and a **snapshot of the current state**. It
 is the set of interfaces Platform Mesh exposes today, not a closed list; new
@@ -214,7 +214,7 @@ RFC introduces get a note; the four that already exist point to their contract:
   ([RFC 004](004_core-platform-extendability.md), [RFC 006](006_provider-bootstrap-operator.md)).
 - **GitOps Engine** → the [Core contract](#core): deployment is an
   interface, not a capability; Platform Mesh bundles no engine and supports
-  several (Flux, ArgoCD, plain Helm), chosen by the operator.
+  several (Flux, ArgoCD, plain Helm), chosen by the admin.
 
 ### Adapters
 
@@ -312,7 +312,7 @@ administrator configures the **PlatformMesh custom resource** and the
 owns that reconciliation and is **not tied to a specific packaging or GitOps
 tool** — it does not require Helm or any particular deployment engine. Platform
 Mesh bundles no GitOps engine and supports several (Flux, ArgoCD, plain Helm),
-chosen by the operator. The PlatformMesh resource is the single configuration
+chosen by the admin. The PlatformMesh resource is the single configuration
 surface:
 module toggles, configuration, and runtime mutability (adding or removing
 modules after install, with install-time selection as the minimum first step).
@@ -337,7 +337,7 @@ A documented and validated composition is a "headless" composition without UI.
 | **Tier 3**: Community | Known to work or community-contributed (typically via an adapter), not part of CI | Okta, Auth0, Zitadel, Entra ID, ADFS, Headlamp |
 
 The **GitOps engine is not tiered**: the deployment tool (Flux, ArgoCD, plain
-Helm, …) is the operator's choice, not a module implementation.
+Helm, …) is the admin's choice, not a module implementation.
 
 ## Open Questions / TODOs
 
