@@ -190,7 +190,7 @@ wants a different implementation targets the interface and supplies an
 | **Authorization** | Authorization | Kubernetes authorization webhook (`SubjectAccessReview`) | OpenFGA, ReBAC engine | Any engine behind the webhook; managed Kubernetes RBAC fallback. Relationship-model portability is the open part |
 | **Portal** | UI | **GraphQL** over Platform Mesh resources (served by `kubernetes-graphql-gateway`); `ContentConfiguration` + microfrontend = OpenMFP composition, not a standard ([RFC 001](001-api-providers-and-ui-discovery.md)) | OpenMFP | Headlamp (plugin/adapter), custom portal |
 | **Provider / Marketplace** | Core → UI | `APIExport` / `APIBinding` + provider bootstrap (always); `ProviderMetadata` / `ContentConfiguration` for the marketplace UI (UI, optional) ([RFC 004](004_core-platform-extendability.md), [RFC 006](006_provider-bootstrap-operator.md)) | Platform Mesh core providers | Third-party providers contributed to the marketplace |
-| **Observability** | - | OTLP (OpenTelemetry export) | Platform Mesh emits OTLP; no bundled backend | Your Prometheus / Grafana / Datadog / SIEM / audit pipeline |
+| **Observability** | cross-cutting | OTLP (OpenTelemetry export) | Platform Mesh emits OTLP; no bundled backend | Your Prometheus / Grafana / Datadog / SIEM / audit pipeline |
 | **GitOps Engine** | - | `pm-operator` deploy contract  | none bundled; Flux or ArgoCD (admin chooses) | plain Helm, any deployment tooling |
 
 The table is the canonical map, and a **snapshot of the current state**. It
