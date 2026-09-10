@@ -304,6 +304,9 @@ marketplace. Default: OpenMFP (Portal / IAM / Marketplace UIs), the
 + the microfrontend contract are the optional, OpenMFP-specific composition
   model, not an open standard.
 
+The UI must not make assumptions on a specific authn/authz provider and
+work with the common kubernetes APIs.
+
 ## Packaging and Configuration
 
 Platform Mesh is delivered as an **OCM (Open Component Model) artifact**: the
