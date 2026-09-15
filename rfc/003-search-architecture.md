@@ -2,7 +2,7 @@
 
 Status: Implemented
 Authors: Platform Mesh Team
-Date: 2026-04-20 (updated from 2026-02-17)
+Date: 2026-07-22
 
 ## Summary
 
@@ -228,6 +228,7 @@ organization_id / organization_name
 account_id / account_name
 
 permissions         — []PermissionTuple stored at index time (user, relation, object)
+fga_object          — OpenFGA object used as the target of the authorization check
 
 labels / annotations — flat_object
 custom_fields       — all resource fields, indexed for full-text search by default
@@ -237,6 +238,24 @@ payload_text        — full text representation (indexed for full-text search)
 
 created_at / updated_at
 ```
+
+### Fine-Grained Authorization Filtering
+
+The search service treats OpenSearch results as candidates, not as authorized results. It post-filters every candidate through OpenFGA before returning search results or deriving filter values. There is currently no authorization pre-filter in the OpenSearch query.
+
+For each candidate, the service issues an OpenFGA check with:
+
+- the OpenFGA store whose name exactly matches the request organization
+- user `user:<identity>`, where the identity comes from the authenticated token's `mail` claim, falling back to `sub`, and `:` characters are replaced with `.`
+- relation `get`
+- object from the indexed document's `fga_object` field
+- the indexed document's `permissions` entries as contextual tuples
+
+The batch request does not pin an authorization model ID, so OpenFGA evaluates it against the store's latest model.
+
+`fga_object` is required authorization context. A candidate without a non-empty `fga_object` is dropped. `permissions` is optional; an empty list means the check is evaluated only against tuples already stored in OpenFGA. A denied check or a missing result for a submitted check excludes that candidate. Failure to resolve the organization's store or failure of an OpenFGA batch check fails the whole request as a backend error; the service never returns unfiltered or partially authorized results.
+
+The service fetches OpenSearch candidates in configurable batches (100 by default), splits OpenFGA checks into chunks of at most 100, and continues scanning until it has enough authorized results, OpenSearch is exhausted, or the configured scan limit is reached (1,000 candidates by default). Pagination is therefore over authorized results rather than raw OpenSearch hits. The filter-values endpoint uses the same authorization path and only derives values from authorized documents. The resource-metadata endpoint lists the organization's configured search resources and does not perform per-document FGA checks.
 
 ## Configuration
 
@@ -260,16 +279,16 @@ created_at / updated_at
 - `APIBindingReconciler` — per-resource SearchIndex auto-provisioning
 - `IndexableResourceReconciler` — per-GVK resource watching and document indexing
 - FGA permission tuples embedded at index time
+- Search service REST API with OpenFGA `get` post-filtering, fail-closed handling, authorization-aware pagination, and authorized filter values
 - Multicluster-native implementation via `multicluster-runtime` and `multicluster-provider`
 - OpenSearch integration with per-org-per-resource indexes, deterministic document IDs
 
 ### Planned
 
-1. **Search Service** — REST API with post-filtering, query transformation, result ranking
-2. **Semantic search** — configure OpenSearch `semantic` field mappings for selected `semanticFields` and query them with `neural` search using the configured ML model.
-3. **Pre-filtering optimization** — add account-level filters to OpenSearch queries to reduce batch check size
-4. **Index freshness monitoring** — SLO definition, reconciliation jobs to detect/repair index drift
-5. **Production hardening** — auth, OpenSearch persistence, backup/restore, replica configuration
+1. **Semantic search** — configure OpenSearch `semantic` field mappings for selected `semanticFields` and query them with `neural` search using the configured ML model.
+2. **Pre-filtering optimization** — add account-level filters to OpenSearch queries to reduce batch check size
+3. **Index freshness monitoring** — SLO definition, reconciliation jobs to detect/repair index drift
+4. **Production hardening** — auth, OpenSearch persistence, backup/restore, replica configuration
 
 ## Open Questions
 
