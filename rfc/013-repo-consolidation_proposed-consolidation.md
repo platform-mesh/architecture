@@ -1,9 +1,10 @@
 ---
 title: Platform Mesh Repository Consolidation — Proposed Repo Disposition
-
 ---
 
-# Platform Mesh Repository Consolidation — Proposed Repo Disposition
+# RFC 013: Platform Mesh Repository Consolidation — Proposed Repo Disposition
+
+**Note:** This RFC was previously known as RFC 009, but was re-numbered to solve a conflict with [RFC 009: Platform Mesh Backup and Restore Operator](009-backup-and-restore-operator.md).
 
 > Companion working document to [RFC 009: Platform Mesh Repository Consolidation](https://github.com/platform-mesh/architecture/pull/41).
 > Scope: **Go-only consolidation** into two repositories — `platform-mesh-operator` (standalone) and

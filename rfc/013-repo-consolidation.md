@@ -1,15 +1,17 @@
 ---
-title: 'RFC 009: Platform Mesh Repository Consolidation'
+title: 'RFC 013: Platform Mesh Repository Consolidation'
 
 ---
 
-# RFC 009: Platform Mesh Repository Consolidation
+# RFC 013: Platform Mesh Repository Consolidation
 
 | Status  | Proposed    |
 |---------|-------------|
 | Author  | Mirza Kopic |
 | Created | 2026-06-05  |
 | Updated | 2026-06-05  |
+
+**Note:** This RFC was previously known as RFC 009, but was re-numbered to solve a conflict with [RFC 009: Platform Mesh Backup and Restore Operator](009-backup-and-restore-operator.md).
 
 ## Summary
 
@@ -388,7 +390,7 @@ history-preserving subtree merges, keeping the workspace compiling at each step.
   sibling decision. ADR 009 tiers and labels repos (supported vs `contrib-`, public-by-default)
   and owns the examples/POC long tail; this RFC consolidates the supported Tier-1 code. They
   compose: the consolidated monorepos are Tier-1; the long tail is `contrib-` or archived.
-- **[RFC 006](006_provider-bootstrap-operator.md) (provider bootstrap)** — the provider model is
+- **[RFC 006](006-provider-bootstrap-operator.md) (provider bootstrap)** — the provider model is
   why a stable, independently-versioned `provider-sdk` and CRD `apis` matter; the hybrid release
   model protects external provider authors.
 - **[RFC 008](008-platform-mesh-modularization.md) (configurability / modularity)** — sequenced
@@ -479,7 +481,7 @@ Acceptance criteria the TSC can check against (baselines `gh`-verified 2026-05-2
 - [ADR 001: SBOM Generation and OCM Component Restructuring](../adr/001-sbom-generation-and-ocm-component-restructuring.md)
 - [ADR 004: Shared CI Workflow Strategy](../adr/004-shared-ci-workflow-strategy.md)
 - [ADR 009: Repository Tiers and `contrib-` Prefix](../adr/009-repository-tiers-and-contrib-prefix.md)
-- [RFC 006: Provider Bootstrap Operator](006_provider-bootstrap-operator.md)
+- [RFC 006: Provider Bootstrap Operator](006-provider-bootstrap-operator.md)
 - [RFC 008: Component Modularity and Replaceability](008-platform-mesh-modularization.md)
 - [Open Component Model](https://ocm.software)
 - [Go Modules Reference — module paths, versions, workspaces](https://go.dev/ref/mod)

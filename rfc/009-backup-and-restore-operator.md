@@ -8,6 +8,8 @@
 | RFC PR  | TBD                                                                     |
 | ADR     | [ADR 008](../adr/008-platform-mesh-backup-and-restore.md)               |
 
+**Note:** There was another RFC 009, Platform Mesh Repository Consolidation, which has since been re-assigned to [RFC 013](013-repo-consolidation.md).
+
 ## Summary
 
 [ADR 008](../adr/008-platform-mesh-backup-and-restore.md) chose to build a thin Platform Mesh backup and restore operator that orchestrates [Velero](https://velero.io), [CloudNativePG](https://cloudnative-pg.io), and [etcd-druid](https://github.com/gardener/etcd-druid) under a single platform-level API, with a `topology.json` manifest for architecture-pinned restore and a cross-tier reconciler closing consistency gaps.

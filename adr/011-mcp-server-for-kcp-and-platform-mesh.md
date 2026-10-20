@@ -240,7 +240,7 @@ What this ADR explicitly does NOT solve: an agent handed a user's raw token that
 - [kubernetes-mcp-server kcp provider (PR #657)](https://github.com/containers/kubernetes-mcp-server/pull/657) — Reference for how an MCP-over-kcp integration has been modelled elsewhere.
 - [agentgateway](https://github.com/agentgateway/agentgateway) — Reference implementation of the MCP-aware gateway role for Platform Mesh.
 - [ADR 002: Fine-Grained Access Control for APIExport Binding](002-apiexport-binding-access-control.md) — Platform Mesh's FGA model for API access control; the FGA access provider builds on this.
-- [ADR 003: User Identifier Claim](003_user-identifier-claim.md) — User identity propagation across the stack; dependency for SCAR and FGA intersection.
+- [ADR 003: User Identifier Claim](https://github.com/platform-mesh/architecture/pull/10) — User identity propagation across the stack; dependency for SCAR and FGA intersection.
 - [kcp FrontProxy documentation](https://docs.kcp.io/kcp/main/concepts/front-proxy/) — Identity propagation and path routing used by the Access VW.
 - [kcp Authorization documentation](https://docs.kcp.io/kcp/main/concepts/authorization/) — Multi-stage RBAC chain referenced by the RBAC access provider.
 - [RFC 8693 — OAuth 2.0 Token Exchange](https://datatracker.ietf.org/doc/html/rfc8693)

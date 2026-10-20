@@ -227,8 +227,8 @@ Extend `SEARCHABLE_RESOURCE_RESOURCES` env var format to include field config. R
 
 ## References
 
-- [RFC 003: Search Architecture](../rfc/003-search-architecture.md)
-- [RFC 004: Core Platform Extendability](../rfc/004_core-platform-extendability.md)
-- [RFC 006: Provider Bootstrap Operator](../rfc/006_provider-bootstrap-operator.md)
+- [RFC 014: Search Architecture](../rfc/014-search-architecture.md)
+- [RFC 004: Core Platform Extendability](../rfc/004-core-platform-extendability.md)
+- [RFC 006: Provider Bootstrap Operator](../rfc/006-provider-bootstrap-operator.md)
 - [ADR 002: APIExport Binding Access Control](002-apiexport-binding-access-control.md)
 - [kcp APIResourceSchema documentation](https://docs.kcp.io/kcp/main/concepts/apis/)

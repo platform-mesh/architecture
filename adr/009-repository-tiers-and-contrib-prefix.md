@@ -24,7 +24,7 @@ Repositories without a prefix are **officially supported** by Platform Mesh. The
 * Be `PUBLIC`.
 * Follow the shared CI workflow strategy ([ADR 004](004-shared-ci-workflow-strategy.md)) and test coverage thresholds ([ADR 005](005-default-test-coverage-thresholds.md)).
 * Emit SBOMs and OCM components ([ADR 001](001-sbom-generation-and-ocm-component-restructuring.md)).
-* Follow the security process ([RFC 007](../rfc/007_security-process.md)) — including coordinated vulnerability handling and security backports for supported branches.
+* Follow the security process ([RFC 007](../rfc/007-security-process.md)) — including coordinated vulnerability handling and security backports for supported branches.
 * Have a `CONTRIBUTING.md` and `AGENTS.md` ([ADR 003](003-vendor-neutral-agent-instruction-files.md)).
 * Have a documented release process and accept issues/PRs through the normal review path.
 
@@ -90,4 +90,4 @@ This ADR does not require an immediate rename of every existing repo. Apply the 
 * [ADR 003: Vendor-Neutral Agent Instruction Files](003-vendor-neutral-agent-instruction-files.md)
 * [ADR 004: Shared CI Workflow Strategy](004-shared-ci-workflow-strategy.md)
 * [ADR 005: Default Test Coverage Thresholds](005-default-test-coverage-thresholds.md)
-* [RFC 007: Platform Mesh Security Process](../rfc/007_security-process.md)
+* [RFC 007: Platform Mesh Security Process](../rfc/007-security-process.md)

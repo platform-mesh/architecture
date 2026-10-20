@@ -8,6 +8,8 @@
 | Created      | 2026-04-01                          |
 | Updated      | 2026-09-06                          |
 
+**Note:** There was another RFC 008, Provider Permissions Configuration, which has since been re-assigned to [RFC 012](012-provider-permissions-configuration.md).
+
 ## Summary
 
 This RFC restructures Platform Mesh as a set of composable **modules**. Each
@@ -177,8 +179,8 @@ authorization, GraphQL for the portal, OTLP for observability), not by a
 Platform-Mesh-specific component name; the precise contract per interface lives
 in its ADR. *Capability / API extension*, adding your own APIs, is a separate
 mechanism (providers wired to kcp,
-[RFC 004](004_core-platform-extendability.md) /
-[RFC 006](006_provider-bootstrap-operator.md)); the interfaces here are the
+[RFC 004](004-core-platform-extendability.md) /
+[RFC 006](006-provider-bootstrap-operator.md)); the interfaces here are the
 platform's infrastructure contracts. The default stack (Keycloak, OpenFGA,
 OpenMFP) is one supported set of implementations of them; an admin who
 wants a different implementation targets the interface and supplies an
@@ -189,7 +191,7 @@ wants a different implementation targets the interface and supplies an
 | **Identity** | Authentication | OIDC + RFC 7591 DCR | Keycloak (managed mode) | DCR-capable IdPs (Okta, Auth0, PingFederate) directly; non-DCR IdPs (Zitadel, Entra ID) via a vendor adapter |
 | **Authorization** | Authorization | Kubernetes authorization webhook (`SubjectAccessReview`) | OpenFGA, ReBAC engine | Any engine behind the webhook; managed Kubernetes RBAC fallback. Relationship-model portability is the open part |
 | **Portal** | UI | **GraphQL** over Platform Mesh resources (served by `kubernetes-graphql-gateway`); `ContentConfiguration` + microfrontend = OpenMFP composition, not a standard ([RFC 001](001-api-providers-and-ui-discovery.md)) | OpenMFP | Headlamp (plugin/adapter), custom portal |
-| **Provider / Marketplace** | Core → UI | `APIExport` / `APIBinding` + provider bootstrap (always); `ProviderMetadata` / `ContentConfiguration` for the marketplace UI (UI, optional) ([RFC 004](004_core-platform-extendability.md), [RFC 006](006_provider-bootstrap-operator.md)) | Platform Mesh core providers | Third-party providers contributed to the marketplace |
+| **Provider / Marketplace** | Core → UI | `APIExport` / `APIBinding` + provider bootstrap (always); `ProviderMetadata` / `ContentConfiguration` for the marketplace UI (UI, optional) ([RFC 004](004-core-platform-extendability.md), [RFC 006](006-provider-bootstrap-operator.md)) | Platform Mesh core providers | Third-party providers contributed to the marketplace |
 | **Observability** | cross-cutting | OTLP (OpenTelemetry export) | Platform Mesh emits OTLP; no bundled backend | Your Prometheus / Grafana / Datadog / SIEM / audit pipeline |
 | **GitOps Engine** | - | `pm-operator` deploy contract  | none bundled; Flux or ArgoCD (admin chooses) | plain Helm, any deployment tooling |
 
@@ -211,7 +213,7 @@ RFC introduces get a note; the four that already exist point to their contract:
   (via the gateway); OpenMFP is the default, alternative portals plug in via an
   adapter.
 - **Provider / Marketplace** → the Core provider bootstrap mechanism
-  ([RFC 004](004_core-platform-extendability.md), [RFC 006](006_provider-bootstrap-operator.md)).
+  ([RFC 004](004-core-platform-extendability.md), [RFC 006](006-provider-bootstrap-operator.md)).
 - **GitOps Engine** → the [Core contract](#core): deployment is an
   interface, not a capability; Platform Mesh bundles no engine and supports
   several (Flux, ArgoCD, plain Helm), chosen by the admin.
@@ -389,8 +391,8 @@ Helm, …) is the admin's choice, not a module implementation.
   of static, hand-configured clients; what makes managed multi-org practical.
 - **Provider / provider-bootstrap mechanism**: a capability / API contributed
   via kcp `APIExport` / `APIBinding` and the bootstrap flow of
-  [RFC 004](004_core-platform-extendability.md) /
-  [RFC 006](006_provider-bootstrap-operator.md); the mechanism for *capability
+  [RFC 004](004-core-platform-extendability.md) /
+  [RFC 006](006-provider-bootstrap-operator.md); the mechanism for *capability
   extension*, distinct from the infrastructure interfaces above.
 - **KRM**: the Kubernetes Resource Model; kcp is Platform Mesh's KRM control
   plane. Intent is expressed as resources and reconciled into effects.

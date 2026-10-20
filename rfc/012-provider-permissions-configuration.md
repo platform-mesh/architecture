@@ -1,4 +1,6 @@
-# RFC 008: Provider Permissions Configuration
+# RFC 012: Provider Permissions Configuration
+
+**Note:** This RFC was previously known as RFC 008, but was re-numbered to solve a conflict with [RFC 008: A Modular Framework for Platform Mesh](008-platform-mesh-modularization.md).
 
 ## Context and Problem Statement
 
@@ -18,7 +20,7 @@ type orchestrate_platform-mesh_io_httpbin
     define parent: [core_namespace]
     define owner: [role#assignee] or owner from parent
     define member: [role#assignee] or owner or member from parent
-    
+
     define get: member
     define update: member
     define delete: member
@@ -124,14 +126,14 @@ status:
     - type: RelationsValid
       status: "True"
       message: "All relations parsed successfully"
-    # This status is specifically important because this is how the provider can see 
+    # This status is specifically important because this is how the provider can see
     # if an AuthorizationModel was generated fine or there's an error due to PP resource
     - type: AuthorizationModelIsGenerated
       status: "False"
       message: "Failed to generate AuthorizationModel due to relations duplication"
 ```
 
-## How it addresses each requested functionality 
+## How it addresses each requested functionality
 
 ### 1.1 Add new permissions without new roles
 ```yaml
@@ -252,7 +254,7 @@ roles:
 
 Providers can introduce roles to the resource types they manage and only to them. Roles are grouped by resource types using the `{kind}.{group}` format (e.g., `httpbin.orchestrate.platform-mesh.io`). While generating AuthorizationModel, security-operator will check if there are custom roles from the provider. If roles are defined for the resource type for which AuthorizationModel is generated, security-operator will create role relations based on the `definition` field. A `definition` like `definition: "[role#assignee] or owner", id: codeviewer` will be transformed into this relation `define codeviewer: [role#assignee] or owner`.
 
-## IAM service integration 
+## IAM service integration
 
 The IAM service retrieves custom roles from `ProviderPermissions` resources using a cache-based approach. The cache is populated via an informer watching `ProviderPermissions` across all provider clusters through the multicluster-provider.
 
@@ -308,7 +310,7 @@ Potential validation rules:
 When a `ProviderPermissions` CR is deleted, the operator will just regenerate AuthorizationModel without relations from `ProviderPermissions` resource. So no finalization logic is needed for this resource.
 
 ### Roles sharing between different ApiExports
-If one provider has 2 or more `ApiExports` and wants to have the same role-relation for their API, they can do this by defining the role with an identical name in both `ProviderPermissions` resources. 
+If one provider has 2 or more `ApiExports` and wants to have the same role-relation for their API, they can do this by defining the role with an identical name in both `ProviderPermissions` resources.
 
 ## Future improvements
 1. How to deal with the `from` operator in OpenFGA.
@@ -319,4 +321,4 @@ If providers don't use a custom `from` operator or the default `from parent` rel
 
 * Imagine a provider defines a role which is translated into this relation: `define admin: [role#assignee] or admin from parent` and `parent` is an `account` type. In this case, we can create an identical relation `define admin: [role#assignee] or admin from parent` in the `account` type to let the OpenFGA schema compile. But if we do this, we introduce the logic that an admin of a parent account is an admin of a child account - but maybe the user doesn't want this. They might want an admin per account without inheritance between accounts, while still wanting inheritance between resource types.
 
-2. How can a provider create an organization-wide role? 
+2. How can a provider create an organization-wide role?

@@ -220,7 +220,7 @@ Single codebase, easier deployment. But still causes core bloat and doesn't push
 
 ## References
 
-- [RFC 001: API Provider Metadata and UI Discovery](001_api-providers-and-ui-discovery.md)
-- [RFC 002: Terminal Controller Manager](https://github.com/platform-mesh/architecture/pull/8)
-- [RFC 003: Search Architecture](https://github.com/platform-mesh/architecture/pull/3)
+- [RFC 001: API Provider Metadata and UI Discovery](001-api-providers-and-ui-discovery.md)
+- [RFC: Terminal Controller Manager](https://github.com/platform-mesh/architecture/pull/8)
+- [RFC 014: Search Architecture](../rfc/014-search-architecture.md)
 - [kcp Documentation](https://github.com/kcp-dev/kcp)

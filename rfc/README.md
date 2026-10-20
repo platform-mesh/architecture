@@ -2,10 +2,6 @@
 
 This directory contains Request for Comments (RFCs) documents that describe architectural designs and technical proposals for Platform Mesh.
 
-## Active RFCs
-
-- [RFC-001: Search Architecture](./rfc-001-search-architecture.md) - Generic search engine architecture with OpenFGA integration (Status: Draft)
-
 ## RFC Process
 
 RFCs follow the template structure defined in the [ApeiroRA Architecture Repository](https://github.tools.sap/ApeiroRA/architecture/tree/main/rfc).
@@ -27,7 +23,6 @@ Each RFC should include:
 1. Copy `rfc-000-template.md` from the ApeiroRA repository
 2. Number your RFC sequentially (e.g., `rfc-002-title.md`)
 3. Add relevant diagrams to `assets/` directory
-4. Update this README with your RFC
 
 ## Relationship to ADRs
 

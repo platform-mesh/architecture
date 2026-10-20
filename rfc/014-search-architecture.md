@@ -1,8 +1,10 @@
-# RFC-003 Search Architecture for Platform Mesh
+# RFC 014: Search Architecture for Platform Mesh
 
 Status: Implemented
 Authors: Platform Mesh Team
 Date: 2026-07-22
+
+**Note:** This RFC was previously known as RFC 003, but was re-numbered to solve a conflict with [RFC 003: OpenTelemetry Observability](003-opentelemetry-observability.md).
 
 ## Summary
 
@@ -212,7 +214,7 @@ Configured via environment variable:
 SEARCHABLE_RESOURCE_RESOURCES=core.platform-mesh.io;v1alpha1;Account
 ```
 
-**Note**: This gives some control in the operator configuration to exclude some indexes of the search exports but blocks dynamic updates. There will be a separate ADR in the future. 
+**Note**: This gives some control in the operator configuration to exclude some indexes of the search exports but blocks dynamic updates. There will be a separate ADR in the future.
 
 ### 4. Document Structure
 

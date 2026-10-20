@@ -7,6 +7,8 @@
 | Updated | 2026-03-27                                                                         |
 | RFC PR  | TBD                                                                                |
 
+**Note:** There was another RFC 003, Search Architecture, which has since been re-assigned to [RFC 014](014-search-architecture.md).
+
 ## Motivation
 
 Platform-mesh operators and services already produce telemetry — metrics via controller-runtime's Prometheus registry (`/metrics`), traces via OpenTelemetry spans (RFC 002), and structured logs via `logr`. However, there is no unified collection layer. Each installation must manually configure scraping, trace ingestion, and log aggregation. This creates friction for both local development and production deployments.
