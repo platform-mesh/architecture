@@ -160,6 +160,18 @@ It's a trade-off that can be re-evaluated on a daily basis, if needed.
 
 Technically, release branches must also not be created a priori, but can be created later on-demand (i.e. on the first occasion where something should be backported, i.e. cherrypicked). However, creating such branches is often restricted to people with elevated permissions, so it can be beneficial to just create the release branch on the day of the final release (the `X.Y.0`) as part of the release procedure. Then everyone can easily target cherrypicks to that branch without having to ask in chats first for someone to create the branch.
 
+## CalVer?
+
+[CalVer Reference](https://calver.org/)
+
+There is an argument to be made that Platform Mesh's compatibility layer is not its version, but the version of all the Kubernetes API it handles. Any version that can handle `v1alpha2` of something is compatible to any other version that does. That is the true interface to Platform Mesh and so should be the focus of our compatibility.
+
+Given this, a semantic version for Platform Mesh makes not much sense. One could argue that a calendar-based version, like `v26.10.0` (October 2026, patch version 0) conveys more useful information to the admin. However since the tooling used to install Platform Mesh (flux, ArgoCD, Helm) are geared towards semver, we would have to wrap the date in a semver-like string, like given above. A version like `RELEASE.2026-10` would not work reliably for us.
+
+However realistically speaking, Platform Mesh contains many other moving parts and those might introduce breaking changes that would need to be communicated to admins. Relying on CalVer robs us of this capability.
+
+Given this, this RFC makes no recommendation to switch to CalVer, but would like to generally advocate for that scheme to be used more widely, following the tried "Sounds good – you go first!" model.
+
 ## Proposal
 
 Having discussed all of this, there can be only one solution: Version Platform Mesh as one coherent application. One version number to rule them all. In detail this would mean:
@@ -170,4 +182,3 @@ Having discussed all of this, there can be only one solution: Version Platform M
 * Individual components are not tagged or shipped on their own anymore. This means Helm chart versions are now identical to the component they wrap (i.e. account-operator-chart == account-operator, and inside the `Chart.yaml` the `version` and `appVersion` fields are identical). Charts that wrap upstream components have their `appVersion` point to the upstream version and `version` is the new unified Platform Mesh version.
 * Inside the repository, each chart has `version: 0.0.0` and gets the real version injected during the release workflow. End-users are not meant to install the charts from the Git repository anyway, and having "no" version further discourages that.
 * To make a change available in older Platform Mesh releases, they just need to be git-cherrypicked.
-
