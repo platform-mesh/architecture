@@ -8,13 +8,15 @@
 
 ## Overview
 
-This RFC proposes a new system to version and release Platform Mesh.
+This RFC proposes a new system to version and release Platform Mesh. It's a follow-up to [RFC 013: Repository Consolidation](./013-repo-consolidation.md), which made us merge a lot of repositories into one, but not really address their versioning schemes at all. With current efforts to further simplify the release process and take the further steps outlines in RFC 013, especially the "charts live next to the code they deploy", we would merge Helm charts into the Platform Mesh monorepo, further worsening the situation with all the different versions.
+
+To enable further improvements, this RFC therefore proposes to take a step back and re-evaluate the versioning scheme for the new monorepo world we find ourselves in.
 
 ## Background
 
 In ye olden days, Platform Mesh consisted of a large number of components, each homed in their own git repository, like the account-operator, security-operator, rebac-authz-webhook etc. To make a new Platform Mesh release, we would collect the most recent release of each component at the time of making the PM release.
 
-Now after RFC 013 (Repo Consolidation) has been completed, most of these standalone repositories have been merged into a single monorepo, including all their existing versions. So for example account-operator v1.2.3 would have become the new git tag `account-operator/v1.2.3` in the monorepo.
+Now after RFC 013 (Repo Consolidation) has been half-completed, most of these standalone repositories have been merged into a single monorepo, including all their existing versions. So for example account-operator v1.2.3 would have become the new git tag `account-operator/v1.2.3` in the monorepo.
 
 Having all those different components share a single repository, but keep their own versioning, introduces a lot of complexity and difficulty for handling releases.
 
@@ -79,11 +81,7 @@ Do note that still, during a cherrypick, the author/agent would have to adjust t
 
 When a new Platform Mesh release is then to be made, _all_ component release branches are merged back into Platform Mesh's release branch (i.e. `account-operator-0.7` is merged into `release-0.6`, then `security-operator-0.15` is merged into `release-0.6` etc.).
 
-## Summary
-
-We can clearly see that the current situation we maneuvered ourselves into is not working anymore. We are as of now incapable of making patch releases for older Platform Mesh releases and the approach of versioning each component/chart independently is causing a lot of churn and complexity.
-
-## Why version something in the first place?
+### Why version something in the first place?
 
 At this point, we should step back and ask ourselves a question: In this example that we've already seen:
 
@@ -99,19 +97,77 @@ Look at Keith, who installed Platform Mesh today. He sees that version 0.5.2 is 
 
 This leads to even more uncertainty:
 
-a) Can someone use it? @brsmnv already brought up the topic of compatibility matrixes: If we randomly ship random components, how will anyone figure out which of these are even applicable to them? _Especially_ since Platform Mesh 0.5 ships with components in versions 0.7, 0.59, 1.5.2, etc. -- all over the place.
+* Can someone use it? @brsmnv already brought up the topic of compatibility matrixes: If we randomly ship random components, how will anyone figure out which of these are even applicable to them? _Especially_ since Platform Mesh 0.5 ships with components in versions 0.7, 0.59, 1.5.2, etc. -- all over the place.
 
-b) If we decided to ship account-operator 0.7.1, why did we not actually release it? There is no changelog, no release notes, nothing. Just a tag and a hardy "Yolo, have fun with it!" from us.
+* If we decided to ship account-operator 0.7.1, why did we not actually release it? There is no changelog, no release notes, nothing. Just a tag and a hardy "Yolo, have fun with it!" from us.
 
-c) If we decided that a commit is generally useful, stable and consumable by admins, why would we not simply ship it as a new Platform Mesh release? Shipping it as a new release has all the benefits: A changelog, a nice GitHub release, visibility, all the good stuff.
+* If we decided that a commit is generally useful, stable and consumable by admins, why would we not simply ship it as a new Platform Mesh release? Shipping it as a new release has all the benefits: A changelog, a nice GitHub release, visibility, all the good stuff.
 
 Just randomly tagging components will build artifacts. But ... then nobody can really make use of them.
+
+### Summary
+
+We can clearly see that the current situation we maneuvered ourselves into is not working anymore. We are as of now incapable of making patch releases for older Platform Mesh releases and the approach of versioning each component/chart independently is causing a lot of churn and complexity.
+
+## Current Versions
+
+Since Platform Mesh already exists and has been released a couple of times, to harmonize all versions we should settle on the next "free" major or minor version. As of October 20th, we have shipped:
+
+| Component | Version |
+| ---------------- | ------ |
+| account-operator | 0.21.1 |
+| account-operator-crds | 0.4.0 |
+| common | 0.16.0 |
+| example-httpbin-operator | 0.10.1 |
+| extension-manager-operator | 0.43.0 |
+| extension-manager-operator-crds | 0.5.0 |
+| gateway-api-crds | 1.5.1 |
+| iam-service | 0.23.0 |
+| iam-ui | 0.12.1 |
+| infra | 0.44.2 |
+| kcp-access-vw | 0.1.1 |
+| kcp-mcp-vw | 0.1.1 |
+| keycloak-operator | 0.10.0 |
+| kro-composition-operator | 0.5.1 |
+| kubernetes-graphql-gateway | 0.53.0 |
+| kubernetes-graphql-gateway-crds | 0.4.0 |
+| marketplace-ui | 0.13.0 |
+| observability | 0.9.0 |
+| platform-mesh-operator | 0.59.0 |
+| platform-mesh-operator-crds | 0.13.0 |
+| platform-mesh-prerequisites | 0.2.1 |
+| portal | 0.21.9 |
+| rebac-authz-webhook | 0.23.0 |
+| security-operator | 0.38.2 |
+| security-operator-crds | 0.6.0 |
+| terminal-controller-manager | 0.8.1 |
+| virtual-workspaces | 0.14.0 |
+
+The highest already used version is `gateway-api-crds` with `1.5.1`. This is a Helm chart that purely contains upstream CRDs for Gateway API and follows the versioning of [upstream](https://github.com/kubernetes-sigs/gateway-api) and doesn't influence our own version.
+
+The highest version number of _Platform Mesh_ components is used by `platform-mesh-operator` at `0.59.0`. This enables us to start over at `0.60.0`, which also sounds nice (consumers would go from 0.5 to 0.60, "just one more zero in there").
+
+This will lead to a faux downgrade of the `gateway-api-crds` in existing installations. If we go with 0.60 as the new starting point, the hope is that there will be a more Kube-native way to install the `gateway-api-crds` in the future, long before Platform Mesh reaches 1.4.1 (the very first version of this chart we ever produced) and would conflict. This is a real risk that we would take if we decide on 0.60.
+
+## Release Branching Timeline
+
+There is no hard requirement for where a release branch has to be branched off the `main` branch: some projects do it on the first alpha, some only on the final `X.Y.0` release. The idea behind release branches is unaffected by this, the difference is primarily workflow based:
+
+* Branching the release branch off early means that the `main` branch is immediately ready to receive breaking changes again. In effect, there would be no prolonged code freeze on the `main` branch, where only bugfixes must be merged. But the downside is that every bugfix that is meant to be shipped has to be cherrypicked into the new release branch already.
+* Branching off late, for example on a release candidate or even the final release, allows for bugfixes to land easily, but requires everyone to hold off with breaking changes for a while.
+
+It's a trade-off that can be re-evaluated on a daily basis, if needed.
+
+Technically, release branches must also not be created a priori, but can be created later on-demand (i.e. on the first occasion where something should be backported, i.e. cherrypicked). However, creating such branches is often restricted to people with elevated permissions, so it can be beneficial to just create the release branch on the day of the final release (the `X.Y.0`) as part of the release procedure. Then everyone can easily target cherrypicks to that branch without having to ask in chats first for someone to create the branch.
 
 ## Proposal
 
 Having discussed all of this, there can be only one solution: Version Platform Mesh as one coherent application. One version number to rule them all. In detail this would mean:
 
 * Platform Mesh releases are made by tagging a commit with `vX.Y.Z`.
-* Individual components are not tagged or shipped on their own anymore.
-* To make a change available in older Platform Mesh releases, they just need to be cherrypicked with git. Since no version numbers are included in the codebase, this is trivial.
+* Each `X.Y.0` release gets a new `release-X.Y` branch created.
+* Patch releases are tagged on their parent release branch (i.e. `vX.Y.Z` is on `release-X.Y`).
+* Individual components are not tagged or shipped on their own anymore. This means Helm chart versions are now identical to the component they wrap (i.e. account-operator-chart == account-operator, and inside the `Chart.yaml` the `version` and `appVersion` fields are identical). Charts that wrap upstream components have their `appVersion` point to the upstream version and `version` is the new unified Platform Mesh version.
+* Inside the repository, each chart has `version: 0.0.0` and gets the real version injected during the release workflow. End-users are not meant to install the charts from the Git repository anyway, and having "no" version further discourages that.
+* To make a change available in older Platform Mesh releases, they just need to be git-cherrypicked.
 
