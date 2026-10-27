@@ -43,7 +43,7 @@ To achieve this, the modularization will rely on the base concepts of [the RBAC 
 
 Authorization modules are integrated through the `SubjectAccessReview` webhook. The integration must specify authorizer order and `Allow`, `Deny` and `NoOpinion` behavior. If a backend is temporarily unavailable it must not switch to native RBAC or allow failed checks.
 
-kcp evaluates maximal permission policies (MPP) within its RBAC chain. The complication is that the RBAC chain and the external webhook are separate authorizers -- kcp API server has a built-in RBAC chain, including MPP checks, but it separately calls Platform Mesh’s authorization webhook over HTTPS. That means we cannot assume that every authorization path includes MPP checks. A backend grant is not allowed to authorize the request prohibited by target-workspace access restrictions or to give access to an exported API that an MPP prohibits.
+kcp evaluates maximal permission policies (MPP) within its RBAC chain. In the default authorizer order this happens before the webhook evaluation. When an MPP check that does not permit a request, it returns `NoOpinion`. If other RBAC chain steps return `NoOpinion` along with MPP, this would allow to continue to the webhook evaluation step. As a result a position of a webhook alone does not guarantee MPP enforcement. Authorization integrations must ensure workspace and API provider restrictions, including configured MPPs.
 
 ### Authorization Contract
 
