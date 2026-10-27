@@ -70,6 +70,8 @@ As described in RFC 008, IAM owns reconciliation of authorization intent into th
 
 Native resources such as `Role`, `ClusterRole`, `RoleBinding` and `ClusterRoleBinding` require no additional projection. Additional CRDs should be used only if existing resources cannot describe a required authorization intent.
 
+Authorization contract covers permission and assignment listing, their management and creation in order to enable the components like member UI to perform these operations through the common GraphQL interface over KRM resources.
+
 ### Provisioning and access grants
 
 Permission assignment and user provisioning have independent of each other lifecycles. Creating an `Invite` does not grant permissions. A workflow may require both, but assignments use the same authorization contract for invited and externally provisioned users. Access management must work when Platform Mesh user provisioning is disabled. The contract defines how an invitation email resolves to an authenticated subject in the relevant organization and issuer scope.
