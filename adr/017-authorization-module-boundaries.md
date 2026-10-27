@@ -76,7 +76,7 @@ Authorization contract covers permission and assignment listing, their managemen
 
 Permission assignment and user provisioning have independent of each other lifecycles. Creating an `Invite` does not grant permissions. A workflow may require both, but assignments use the same authorization contract for invited and externally provisioned users. Access management must work when Platform Mesh user provisioning is disabled. The contract defines how an invitation email resolves to an authenticated subject in the relevant organization and issuer scope.
 
-Alternative IdP integrations may project explicit grants into provider roles or claim mappings, but KRM remains the source of authorization intent. Owner, scope, expiry and revocation rules are required for each projection. IAM provides a default reconciliation process into authorization backend.
+Alternative IdP integrations may optionally project explicit grants into provider roles or claim mappings, but KRM remains the source of truth for those grants. Owner, scope, grant expiry and revocation rules are required for each projection. IAM provides a default reconciliation process into authorization backend.
 
 ### Deployment scenarios
 
