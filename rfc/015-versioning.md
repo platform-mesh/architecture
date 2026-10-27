@@ -113,41 +113,49 @@ We can clearly see that the current situation we maneuvered ourselves into is no
 
 Since Platform Mesh already exists and has been released a couple of times, to harmonize all versions we should settle on the next "free" major or minor version. As of October 20th, we have shipped:
 
-| Component | Version |
-| ---------------- | ------ |
-| account-operator | 0.21.1 |
-| account-operator-crds | 0.4.0 |
-| common | 0.16.0 |
-| example-httpbin-operator | 0.10.1 |
-| extension-manager-operator | 0.43.0 |
-| extension-manager-operator-crds | 0.5.0 |
-| gateway-api-crds | 1.5.1 |
-| iam-service | 0.23.0 |
-| iam-ui | 0.12.1 |
-| infra | 0.44.2 |
-| kcp-access-vw | 0.1.1 |
-| kcp-mcp-vw | 0.1.1 |
-| keycloak-operator | 0.10.0 |
-| kro-composition-operator | 0.5.1 |
-| kubernetes-graphql-gateway | 0.53.0 |
-| kubernetes-graphql-gateway-crds | 0.4.0 |
-| marketplace-ui | 0.13.0 |
-| observability | 0.9.0 |
-| platform-mesh-operator | 0.59.0 |
-| platform-mesh-operator-crds | 0.13.0 |
-| platform-mesh-prerequisites | 0.2.1 |
-| portal | 0.21.9 |
-| rebac-authz-webhook | 0.23.0 |
-| security-operator | 0.38.2 |
-| security-operator-crds | 0.6.0 |
-| terminal-controller-manager | 0.8.1 |
-| virtual-workspaces | 0.14.0 |
+| Component | Latest git tag | Chart version | Chart appVersion |
+|---|---|---|---|
+| account-operator | account-operator/v0.15.5 | 0.23.0 | v0.15.5 |
+| apis | apis/v0.1.0 | – | – |
+| backup-operator | backup-operator/v0.1.0 | – | – |
+| common | – | 0.16.0 | – |
+| example-httpbin-operator | – | 0.10.1 | v0.6.3 |
+| extension-manager-operator | extension-manager-operator/v0.10.0 | 0.45.0 | v0.10.0 |
+| extension-manager-operator-crds | – | 0.5.0 | 0.0.0 |
+| gateway-api-crds | – | 1.5.1 | 0.0.0 |
+| golang-commons | golang-commons/v0.20.0 | – | – |
+| iam-service | iam-service/v0.19.0 | 0.23.0 | v0.19.0 |
+| iam-ui | – | 0.12.4 | v0.12.20 |
+| infra | – | 0.45.0 | 0.0.0 |
+| kcp-access-vw | – | 0.1.1 | 0.1.1 |
+| kcp-mcp-vw | – | 0.1.1 | 0.1.1 |
+| kcp-migration-operator | kcp-migration-operator/v0.3.0 | – | – |
+| keycloak-operator | – | 0.11.0 | 0.0.0 |
+| kro-composition-operator | kro-composition-operator/v0.3.0 | 0.5.1 | v0.3.0 |
+| kubernetes-graphql-gateway | kubernetes-graphql-gateway/v1.20.0 | 0.54.0 | v1.20.0 |
+| kubernetes-graphql-gateway-crds | – | 0.4.0 | 0.0.0 |
+| marketplace-ui | – | 0.13.0 | v0.14.0 |
+| observability | – | 0.9.0 | 0.0.0 |
+| platform-mesh-operator | platform-mesh-operator/v0.89.1 | 0.61.0 | v0.89.1 |
+| platform-mesh-operator-crds | – | 0.13.0 | 0.0.0 |
+| platform-mesh-prerequisites | – | 0.2.2 | 0.1.0 |
+| portal | – | 0.21.16 | v0.27.17 |
+| rebac-authz-webhook | rebac-authz-webhook/v0.12.0 (newer pre-release: v0.12.1-test.3) | 0.25.0 | v0.12.0 |
+| resource-broker | resource-broker/v0.1.0 | – | – |
+| search-operator | search-operator/v0.7.0 | – | – |
+| search-service | search-service/v0.1.0 | – | – |
+| security-operator | security-operator/v0.36.0 | 0.40.0 | v0.36.0 |
+| subroutines | subroutines/v0.7.0 | – | – |
+| tenancy-operator | tenancy-operator/v0.0.2 | – | – |
+| terminal-controller-manager | terminal-controller-manager/v0.7.0 | 0.8.1 | v0.7.0 |
+| virtual-workspaces | virtual-workspaces/v0.17.0 | 0.14.0 | v0.17.0 |
+| *(old helm-charts repo tag)* | helm-charts/0.5.2 | – | – |
 
-The highest already used version is `gateway-api-crds` with `1.5.1`. This is a Helm chart that purely contains upstream CRDs for Gateway API and follows the versioning of [upstream](https://github.com/kubernetes-sigs/gateway-api) and doesn't influence our own version.
+<del>The highest already used version is `gateway-api-crds` with `1.5.1`. This is a Helm chart that purely contains upstream CRDs for Gateway API and follows the versioning of [upstream](https://github.com/kubernetes-sigs/gateway-api) and doesn't influence our own version.</del>
 
-The highest version number of _Platform Mesh_ components is used by `platform-mesh-operator` at `0.59.0`. This enables us to start over at `0.60.0`, which also sounds nice (consumers would go from 0.5 to 0.60, "just one more zero in there").
+<del>The highest version number of _Platform Mesh_ components is used by `platform-mesh-operator` at `0.59.0`. This enables us to start over at `0.60.0`, which also sounds nice (consumers would go from 0.5 to 0.60, "just one more zero in there").</del>
 
-This will lead to a faux downgrade of the `gateway-api-crds` in existing installations. If we go with 0.60 as the new starting point, the hope is that there will be a more Kube-native way to install the `gateway-api-crds` in the future, long before Platform Mesh reaches 1.4.1 (the very first version of this chart we ever produced) and would conflict. This is a real risk that we would take if we decide on 0.60.
+<del>This will lead to a faux downgrade of the `gateway-api-crds` in existing installations. If we go with 0.60 as the new starting point, the hope is that there will be a more Kube-native way to install the `gateway-api-crds` in the future, long before Platform Mesh reaches 1.4.1 (the very first version of this chart we ever produced) and would conflict. This is a real risk that we would take if we decide on 0.60.</del>
 
 ## Release Branching Timeline
 
