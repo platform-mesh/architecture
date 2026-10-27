@@ -151,11 +151,7 @@ Since Platform Mesh already exists and has been released a couple of times, to h
 | virtual-workspaces | virtual-workspaces/v0.17.0 | 0.14.0 | v0.17.0 |
 | *(old helm-charts repo tag)* | helm-charts/0.5.2 | – | – |
 
-<del>The highest already used version is `gateway-api-crds` with `1.5.1`. This is a Helm chart that purely contains upstream CRDs for Gateway API and follows the versioning of [upstream](https://github.com/kubernetes-sigs/gateway-api) and doesn't influence our own version.</del>
-
-<del>The highest version number of _Platform Mesh_ components is used by `platform-mesh-operator` at `0.59.0`. This enables us to start over at `0.60.0`, which also sounds nice (consumers would go from 0.5 to 0.60, "just one more zero in there").</del>
-
-<del>This will lead to a faux downgrade of the `gateway-api-crds` in existing installations. If we go with 0.60 as the new starting point, the hope is that there will be a more Kube-native way to install the `gateway-api-crds` in the future, long before Platform Mesh reaches 1.4.1 (the very first version of this chart we ever produced) and would conflict. This is a real risk that we would take if we decide on 0.60.</del>
+The highest version number of Platform Mesh-native components is used by `kubernetes-graphql-gateway` at `1.20.0` and the `platform-mesh-operator` at `0.89.1`. Finding a new starting point so that all releases going forward will not eventually reach around and potentially re-define existing versions is tough, so this RFC proposes [CalVer](#calver) as an alternative further down.
 
 ## Release Branching Timeline
 
@@ -174,19 +170,22 @@ Technically, release branches must also not be created a priori, but can be crea
 
 There is an argument to be made that Platform Mesh's compatibility layer is not its version, but the version of all the Kubernetes API it handles. Any version that can handle `v1alpha2` of something is compatible to any other version that does. That is the true interface to Platform Mesh and so should be the focus of our compatibility.
 
-Given this, a semantic version for Platform Mesh makes not much sense. One could argue that a calendar-based version, like `v26.10.0` (October 2026, patch version 0) conveys more useful information to the admin. However since the tooling used to install Platform Mesh (flux, ArgoCD, Helm) are geared towards semver, we would have to wrap the date in a semver-like string, like given above. A version like `RELEASE.2026-10` would not work reliably for us.
+Given this, a semantic version for Platform Mesh makes not much sense. We have also seen above that the "used-up" range for semvers is all the way at `1.20.0` already, which would force us to use at least `1.21` for the next Platform Mesh release, making quite a significant, yet meaningless jump to a mostly arbitrary new version.
 
-However realistically speaking, Platform Mesh contains many other moving parts and those might introduce breaking changes that would need to be communicated to admins. Relying on CalVer robs us of this capability.
+One could argue that a calendar-based version, like `v26.10.0` (October 2026, patch version 0) conveys more useful information to the admin. However since the tooling used to install Platform Mesh (flux, ArgoCD, Helm) are geared towards semver, we would have to wrap the date in a semver-like string, like given above. A version like `RELEASE.2026-10` would not work reliably for us.
 
-Given this, this RFC makes no recommendation to switch to CalVer, but would like to generally advocate for that scheme to be used more widely, following the tried "Sounds good – you go first!" model.
+For these reasons this RFC proposes using CalVer in the future to version Platform Mesh. The proposed versioning scheme is what projects like Ubuntu are already using: `vYY.MM[.Patch]`, for example `v26.10.0` for the October 2026 release. For patch releases the final number is incremented (like in semver), for example in late October or November a `v26.10.1` would follow. Versions of this schema follow the semver convention nicely.
+
+This scheme leaves enough room for monthly releases without being to overly verbose and include the day of the month (which would enable more frequent "minor" releases). Judging from the current velocity it's unlikely that Platform Mesh will ever want to do feature releases (what in semver would be called "minor releases") more than once per month though.
 
 ## Proposal
 
 Having discussed all of this, there can be only one solution: Version Platform Mesh as one coherent application. One version number to rule them all. In detail this would mean:
 
-* Platform Mesh releases are made by tagging a commit with `vX.Y.Z`.
-* Each `X.Y.0` release gets a new `release-X.Y` branch created.
-* Patch releases are tagged on their parent release branch (i.e. `vX.Y.Z` is on `release-X.Y`).
+* `YY` stands for the last two digits of the current year, `MM` for the zero-padded month and `Patch` is an incrementing number for each subsequent release, like is done in semver.
+* Platform Mesh releases are made by tagging a commit with `vYY.MM.Patch`.
+* Each `YY.MM.0` release gets a new `release-YY.MM` branch created.
+* Patch releases are tagged on their parent release branch (i.e. `vYY.MM.3` is on `release-YY.MM`).
 * Individual components are not tagged or shipped on their own anymore. This means Helm chart versions are now identical to the component they wrap (i.e. account-operator-chart == account-operator, and inside the `Chart.yaml` the `version` and `appVersion` fields are identical). Charts that wrap upstream components have their `appVersion` point to the upstream version and `version` is the new unified Platform Mesh version.
 * Inside the repository, each chart has `version: 0.0.0` and gets the real version injected during the release workflow. End-users are not meant to install the charts from the Git repository anyway, and having "no" version further discourages that.
 * To make a change available in older Platform Mesh releases, they just need to be git-cherrypicked.
