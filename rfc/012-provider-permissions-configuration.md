@@ -2,9 +2,6 @@
 
 **Note:** This RFC was previously known as RFC 008, but was re-numbered to solve a conflict with [RFC 008: A Modular Framework for Platform Mesh](008-platform-mesh-modularization.md).
 
-The extension for parent-scoped `create`, `list` and `watch` overrides is proposed
-with [platform-mesh/platform-mesh#442](https://github.com/platform-mesh/platform-mesh/pull/442).
-
 ## Context and Problem Statement
 
 Currently, for a provider's API, Platform Mesh generates an AuthorizationModel resource with default relations within Kubernetes. For example, an AuthorizationModel for the example-data provider looks like this:
