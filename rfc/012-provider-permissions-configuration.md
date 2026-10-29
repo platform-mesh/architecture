@@ -43,7 +43,7 @@ And it's not flexible right now. With this feature we want to introduce the abil
 2. The `ProviderPermissions` resource will be part of the `providers.platform-mesh.io` APIExport, making it available in provider's workspaces under `:root:providers` path and in `:root:platform-mesh-system` workspace.
 3. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
 4. Providers can overwrite object permissions only for resources exposed by their referenced APIExport. They cannot overwrite permissions for another provider's API or for default Kubernetes resources.
-5. Providers can also overwrite the generated `create_<group>_<plural>`, `list_<group>_<plural>` and `watch_<group>_<plural>` relations for those resources on the shared parent account or namespace type. This exception does not allow changing shared parent relations such as `member`, `owner` or `authenticated_user`, or adding provider-defined roles to the parent.
+5. Providers can also overwrite the generated `create_<group>_<plural>`, `list_<group>_<plural>` and `watch_<group>_<plural>` relations for those resources on the shared parent account or namespace type. This exception does not allow changing shared parent relations such as `member` or `owner`, or adding provider-defined roles to the parent.
 
 ## Flow of work
 1. Provider creates a ProviderPermissions resource in the provider's workspace. This might happen when an AuthorizationModel already exists or after it.
@@ -292,62 +292,7 @@ be configured independently if users should also read individual objects. A
 create override similarly controls permission to create resources in that
 collection; it does not change update, delete or patch permissions.
 
-### 2.2 Authenticated-user component reads
-
-When the existing account model and assignments provide an
-`authenticated_user` relation covering authenticated users, a provider can grant
-those users read access to cluster-scoped components without adding a relation or
-changing the account's other permissions:
-
-```yaml
-apiVersion: providers.platform-mesh.io/v1alpha1
-kind: ProviderPermissions
-metadata:
-  name: metadata
-spec:
-  apiExport:
-    ref:
-      name: metadata.dxp.sap.com
-  permissions:
-    component.metadata.dxp.sap.com:
-      defaultPermissions:
-        get: authenticated_user from parent or member
-        list: authenticated_user or member
-        watch: authenticated_user or member
-```
-
-The relevant generated relations are:
-
-```fga
-extend type core_platform-mesh_io_account
-  relations
-    define create_metadata_dxp_sap_com_components: owner
-    define list_metadata_dxp_sap_com_components: authenticated_user or member
-    define watch_metadata_dxp_sap_com_components: authenticated_user or member
-
-type metadata_dxp_sap_com_component
-  relations
-    define parent: [core_platform-mesh_io_account]
-    define owner: [role#assignee] or owner from parent
-    define member: [role#assignee] or owner or member from parent
-    define get: authenticated_user from parent or member
-    define update: member
-    define delete: member
-    define patch: member
-    define watch: watch_metadata_dxp_sap_com_components from parent
-```
-
-Existing account-to-account authenticated-user inheritance can supply the GET,
-LIST and WATCH checks. This configuration does not grant those users create,
-update, delete or patch access unless they already qualify through the default
-relations. Other resource types retain their generated defaults.
-
-For namespaced resources, using `authenticated_user` requires that relation to
-exist on `core_namespace`. The default namespace model does not define it;
-account assignments alone do not add namespace inheritance. Such inheritance
-would require a separate change to the core namespace model.
-
-### 2.3 Compatibility of existing watch overrides
+### 2.2 Compatibility of existing watch overrides
 
 Previously, `defaultPermissions.watch` changed only the resource object's
 `watch` relation. Kubernetes watch requests still checked the hardcoded
@@ -359,9 +304,8 @@ object watch relations retain their existing `member` defaults.
 An omitted watch field needs no migration. Existing custom watch expressions must
 be reviewed in the parent context. For example, `viewer or member` must be
 rewritten if `viewer` exists only on the resource, while an object expression
-`authenticated_user from parent or member` becomes
-`authenticated_user or member` when evaluated on an account that defines that
-relation. Expressions that use existing parent relations can remain syntactically
+`owner from parent or member` becomes `owner or member` when the intended
+owner is on the resource's parent account or namespace. Expressions that use existing parent relations can remain syntactically
 unchanged, but the configured object watch permission now follows the parent;
 resource-local role assignments no longer grant that configured watch permission
 on their own.
