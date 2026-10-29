@@ -2,6 +2,9 @@
 
 **Note:** This RFC was previously known as RFC 008, but was re-numbered to solve a conflict with [RFC 008: A Modular Framework for Platform Mesh](008-platform-mesh-modularization.md).
 
+The extension for parent-scoped `create`, `list` and `watch` overrides is proposed
+with [platform-mesh/platform-mesh#442](https://github.com/platform-mesh/platform-mesh/pull/442).
+
 ## Context and Problem Statement
 
 Currently, for a provider's API, Platform Mesh generates an AuthorizationModel resource with default relations within Kubernetes. For example, an AuthorizationModel for the example-data provider looks like this:
@@ -42,7 +45,8 @@ And it's not flexible right now. With this feature we want to introduce the abil
 1. Introduce a `ProviderPermissions` CRD in the `providers.platform-mesh.io` API group which will be responsible for extending/overwriting relations which are defined in AuthorizationModel.
 2. The `ProviderPermissions` resource will be part of the `providers.platform-mesh.io` APIExport, making it available in provider's workspaces under `:root:providers` path and in `:root:platform-mesh-system` workspace.
 3. CRs of this CRD will be owned by the provider and will be created in the provider's workspace alongside the ApiExport, ApiResourceSchema, ContentConfiguration, ProviderMetadata, and other provider resources.
-4. Providers cannot overwrite relations for types in OpenFGA which they don't own. For example, a provider cannot overwrite relations for an API of another provider or for default Kubernetes resources.
+4. Providers can overwrite object permissions only for resources exposed by their referenced APIExport. They cannot overwrite permissions for another provider's API or for default Kubernetes resources.
+5. Providers can also overwrite the generated `create_<group>_<plural>`, `list_<group>_<plural>` and `watch_<group>_<plural>` relations for those resources on the shared parent account or namespace type. This exception does not allow changing shared parent relations such as `member`, `owner` or `authenticated_user`, or adding provider-defined roles to the parent.
 
 ## Flow of work
 1. Provider creates a ProviderPermissions resource in the provider's workspace. This might happen when an AuthorizationModel already exists or after it.
@@ -51,7 +55,7 @@ And it's not flexible right now. With this feature we want to introduce the abil
 
 
 ## Open questions
-1. How to deal with `from` operator and `from parent` relation in terms of our OpenFGA structure
+1. How to inherit provider-defined roles through shared parent types without introducing conflicting relations. Inheriting existing parent relations for object permissions, and overriding the resource-specific collection permissions described below, does not require adding those roles to the parent.
 
 ### OpenFGA DSL Syntax for OpenFGA mode
 
@@ -109,7 +113,9 @@ spec:
     # name of permission sections should match {singular}.{group} of resource specified in ApiExport
     httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
+        create: ""  # uses default parent relation - define create_orchestrate_platform-mesh_io_httpbins: owner
         get: "codeviewer or member"  # define get: codeviewer or member
+        list: ""  # uses default parent relation - define list_orchestrate_platform-mesh_io_httpbins: member
         update: ""  # uses default relation - define update: member
         delete: ""
         patch: ""
@@ -149,7 +155,9 @@ spec:
   permissions:
     httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
+        create: ""
         get: ""
+        list: ""
         update: ""
         delete: ""
         patch: ""
@@ -190,7 +198,9 @@ spec:
   permissions:
     httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
+        create: ""
         get: ""
+        list: ""
         update: ""
         delete: ""
         patch: ""
@@ -204,7 +214,21 @@ spec:
 ```
 
 ### 2. Change default permissions
-To change default permission-relations in the generated AuthorizationModel, providers have the `defaultPermissions` section. Currently, we allow overriding only 5 default Kubernetes verbs: `get`, `update`, `delete`, `patch`, `watch`. From an OpenFGA perspective, providers can write any relation instead of the default one. From an RBAC perspective, providers can use this for role name override.
+The `defaultPermissions` section allows overriding seven Kubernetes verbs:
+`create`, `get`, `list`, `update`, `delete`, `patch` and `watch`. Each field
+contains an OpenFGA expression valid on the type where the permission is checked.
+Omitting a field or setting it to an empty string retains its default. In a future
+RBAC implementation, these fields could instead identify roles.
+
+| Verb | Generated relation | Evaluation context | Default |
+| --- | --- | --- | --- |
+| `create` | `create_<group>_<plural>` | Parent account or namespace | `owner` |
+| `list` | `list_<group>_<plural>` | Parent account or namespace | `member` |
+| `watch` | `watch_<group>_<plural>` | Parent account or namespace | `member` |
+| `get`, `update`, `delete`, `patch` | Corresponding verb | Resource object | `member` |
+
+The group in a generated relation name is normalized in the same way as in the
+authorization webhook. ProviderPermissions keys use `{singular}.{group}`.
 
 ```yaml
 apiVersion: providers.platform-mesh.io/v1alpha1
@@ -227,16 +251,123 @@ spec:
   permissions:
     httpbin.orchestrate.platform-mesh.io:
       defaultPermissions:
+        create: "member"  # evaluated on the parent namespace
         get: "codeviewer"  # will be parsed into define get: codeviewer
                            # it requires adding codeviewer role/relation into additionalPermissions or in roles section
                            # otherwise AuthorizationModel schema generation will fail
+        list: "owner"  # evaluated on the parent namespace
         update: ""
         delete: ""
         patch: ""
-        watch: ""
+        watch: "owner"  # evaluated on the parent namespace; object watch inherits it
       # additionalPermissions:
       #   codeviewer: "[user] or member"  # will be parsed into relation: define codeviewer: [user] or member
 ```
+
+### 2.1 Collection permission context
+
+The Kubernetes authorization webhook checks `create`, `list` and `watch` on
+`core_platform-mesh_io_account` for cluster-scoped resources, and on
+`core_namespace` for namespaced resources. The generator applies the override to
+the resource-specific relation on that parent. For the example above it emits:
+
+```fga
+extend type core_namespace
+  relations
+    define create_orchestrate_platform-mesh_io_httpbins: member
+    define list_orchestrate_platform-mesh_io_httpbins: owner
+    define watch_orchestrate_platform-mesh_io_httpbins: owner
+```
+
+Provider-defined roles and additional permissions exist on the resource object.
+They cannot be referenced directly by a parent-scoped expression. Every relation
+referenced in a collection expression must already exist on the parent type. The
+generator does not create missing shared parent relations or seed assignments.
+
+The meaning of `from parent` follows the type where an expression is evaluated.
+In an object's GET expression, it traverses to the object's account or namespace.
+In a collection expression on an account or namespace, it traverses to that
+parent type's own parent.
+
+LIST and WATCH authorize the entire resource collection within that account or
+namespace. They do not filter individual objects using GET permissions. GET must
+be configured independently if users should also read individual objects. A
+create override similarly controls permission to create resources in that
+collection; it does not change update, delete or patch permissions.
+
+### 2.2 Authenticated-user component reads
+
+When the existing account model and assignments provide an
+`authenticated_user` relation covering authenticated users, a provider can grant
+those users read access to cluster-scoped components without adding a relation or
+changing the account's other permissions:
+
+```yaml
+apiVersion: providers.platform-mesh.io/v1alpha1
+kind: ProviderPermissions
+metadata:
+  name: metadata
+spec:
+  apiExport:
+    ref:
+      name: metadata.dxp.sap.com
+  permissions:
+    component.metadata.dxp.sap.com:
+      defaultPermissions:
+        get: authenticated_user from parent or member
+        list: authenticated_user or member
+        watch: authenticated_user or member
+```
+
+The relevant generated relations are:
+
+```fga
+extend type core_platform-mesh_io_account
+  relations
+    define create_metadata_dxp_sap_com_components: owner
+    define list_metadata_dxp_sap_com_components: authenticated_user or member
+    define watch_metadata_dxp_sap_com_components: authenticated_user or member
+
+type metadata_dxp_sap_com_component
+  relations
+    define parent: [core_platform-mesh_io_account]
+    define owner: [role#assignee] or owner from parent
+    define member: [role#assignee] or owner or member from parent
+    define get: authenticated_user from parent or member
+    define update: member
+    define delete: member
+    define patch: member
+    define watch: watch_metadata_dxp_sap_com_components from parent
+```
+
+Existing account-to-account authenticated-user inheritance can supply the GET,
+LIST and WATCH checks. This configuration does not grant those users create,
+update, delete or patch access unless they already qualify through the default
+relations. Other resource types retain their generated defaults.
+
+For namespaced resources, using `authenticated_user` requires that relation to
+exist on `core_namespace`. The default namespace model does not define it;
+account assignments alone do not add namespace inheritance. Such inheritance
+would require a separate change to the core namespace model.
+
+### 2.3 Compatibility of existing watch overrides
+
+Previously, `defaultPermissions.watch` changed only the resource object's
+`watch` relation. Kubernetes watch requests still checked the hardcoded
+`member` permission on the parent. The override now changes that parent
+permission, and the resource object's watch relation inherits it via
+`watch_<group>_<plural> from parent`. Without an override, both the parent and
+object watch relations retain their existing `member` defaults.
+
+An omitted watch field needs no migration. Existing custom watch expressions must
+be reviewed in the parent context. For example, `viewer or member` must be
+rewritten if `viewer` exists only on the resource, while an object expression
+`authenticated_user from parent or member` becomes
+`authenticated_user or member` when evaluated on an account that defines that
+relation. Expressions that use existing parent relations can remain syntactically
+unchanged, but the configured object watch permission now follows the parent;
+resource-local role assignments no longer grant that configured watch permission
+on their own.
 
 ### 3. Introduce new roles
 
@@ -304,6 +435,8 @@ The validation webhook must validate that a provider can only define permissions
 Potential validation rules:
 - The resource names declared in `spec.permissions` keys (e.g., `httpbin.orchestrate.platform-mesh.io`) must correspond to API resources exposed by the referenced `apiExport`
 - The `groupResource` values in `spec.roles` must match API resources managed by the provider
+- Expressions for `create`, `list` and `watch` must be valid on the resource's parent account or namespace type. Validation must not invent missing parent relations or copy provider-defined roles to shared parent types.
+- Overrides of parent relations must be limited to the generated resource-specific create, list and watch relations for resources in the referenced APIExport; shared relations and other providers' permissions remain outside the provider's ownership.
 
 ### Finalization
 
