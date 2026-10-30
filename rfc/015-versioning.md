@@ -1,10 +1,10 @@
 # RFC 015: Versioning Platform Mesh
 
-| Status  | Collecting Feedback   |
+| Status  | Implemented ([commit](https://github.com/platform-mesh/platform-mesh/commit/3c4743652c8a649be1d97d1eaac7ba494d2880bc))  |
 |---------|------------|
 | Author  | @xrstf |
 | Created | 2026-10-22 |
-| Updated | 2026-10-27 |
+| Updated | 2026-10-29 |
 
 ## Overview
 
