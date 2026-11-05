@@ -43,7 +43,7 @@ To achieve this, the modularization will rely on the base concepts of [the RBAC 
 
 Authorization modules are integrated through the `SubjectAccessReview` webhook. The integration must specify authorizer order and `Allow`, `Deny` and `NoOpinion` behavior. If a backend is temporarily unavailable it must not switch to native RBAC or allow failed checks.
 
-kcp evaluates maximal permission policies (MPP) within its RBAC chain. In the default authorizer order this happens before the webhook evaluation. When an MPP check that does not permit a request, it returns `NoOpinion`. If other RBAC chain steps return `NoOpinion` along with MPP, this would allow to continue to the webhook evaluation step. As a result a position of a webhook alone does not guarantee MPP enforcement. Authorization integrations must ensure workspace and API provider restrictions, including configured MPPs.
+kcp evaluates maximal permission policies (MPP) as an additional restriction within its RBAC chain. In the default authorizer order this happens after the RBAC and webhook evaluation. When an MPP check that does not permit a request, it returns `Deny` and with that it overrides the webhook decision. Authorization integrations must ensure workspace and API provider restrictions, including configured MPPs.
 
 ### Authorization Contract
 
@@ -53,7 +53,7 @@ kcp evaluates maximal permission policies (MPP) within its RBAC chain. In the de
 | Authorization intent  | Describe policies and assignments as shared KRM resources. Define their scope, revocation rules, ownership, creation and update.                                                                 |
 | Authorization queries | Provide the role catalog and assignments needed by IAM. Provide accessible accounts and resource checks needed by search. Define the expected results and access restrictions for these queries. |
 
-`SubjectAccessReview` can only answer a permission request, it cannot store assignments or list accessible resources. Direct calls to a webhook check only that authorizer, so service checks must preserve the same applicable restrictions as API access. The native implementation can use SAR against the target kcp workspace.
+`SubjectAccessReview` can only answer a permission request, it cannot store assignments or list accessible resources. Direct calls to a webhook check only that authorizer and do not include additional restrictions from kcp, so service checks must preserve the same applicable restrictions as API access. For Kubernetes resource operations, service implementations can use SAR against the target kcp workspace to get a permission decision assessed by a webhook, kcp RBAC chain and MPP policies.
 
 The authorization contract's role is to provide a common mapping of authenticated subjects, group claims and account scopes into permission checks. The webhook then receives the identity context provided by kcp with SAR. IAM and search get the corresponding context from authentication data using the same configured mappings. A user's access should not become broader by simply using a different service. Temporary grants must have documented expiry behavior and possible cache must not extend access violating that expiry rule.
 
